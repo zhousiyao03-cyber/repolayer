@@ -6,15 +6,25 @@
 
 ## Status
 
-**Pre-alpha (`v0.0.1-alpha`).** Phase 1 complete: single-repo TypeScript / Python indexing via CLI. MCP server, multi-repo + IDL support, and LLM-driven enhancements are coming in Phase 2 / 3.
+**Pre-alpha (`v0.0.2-alpha`).** Phase 2 complete: multi-repo indexing, IDL (protobuf/thrift), MCP server, incremental update. Phase 3 (LLM enhancement, dogfooding, public release) is up next.
 
-## Phase 1 capabilities
+## Phase 2 capabilities
 
-- CLI: `repolayer init` / `build` / `query`
-- TypeScript / JavaScript / TSX / JSX / MJS parsing via [tree-sitter](https://tree-sitter.github.io/) — extracts exported functions, classes, interfaces, type aliases, and consts
-- Python parsing — extracts top-level functions and classes (including `@decorator`-wrapped), filters underscore-prefixed names
+- **Multi-repo indexing** with cross-repo import resolution (TS via `package.json` name lookup)
+- **IDL graph** — `.proto` and `.thrift` services and methods become first-class graph nodes
+- **`IMPLEMENTS` / `INVOKES` edges** automatically detected via path heuristic (e.g. `services/` → server, otherwise client)
+- **Manual cross-repo links** declared in `repolayer.yml` for HTTP / RPC / opaque dependencies
+- **MCP server** exposing 5 tools to Claude Code / Cursor / any MCP-compatible agent:
+  - `find_context(task_description, budget_tokens)` — minimal relevant context for a coding task
+  - `get_symbol(name, repo?)` — definition + callers + callees of a symbol, cross-repo
+  - `get_callers(symbol, depth)` — reverse call chain
+  - `get_dependencies(repo_or_module, depth)` — forward dependency graph
+  - `list_repos()` — currently indexed repos with metadata
+- **Incremental update** via `git diff` — only re-parse changed files
+- 4 source-language parsers (TypeScript / JavaScript / Python / Go)
+- 2 IDL parsers (protobuf / thrift)
 - SQLite-backed graph (`.repolayer/index.db`) with stable SHA256 node IDs
-- Substring symbol search across the indexed graph
+- Substring symbol search via `repolayer query`
 
 ## Quickstart (build from source)
 
@@ -25,11 +35,13 @@ git clone https://github.com/zhousiyao03/repolayer
 cd repolayer
 cargo install --path .
 
-# In your project directory:
-repolayer init             # creates repolayer.yml
+# In your workspace:
+repolayer init                   # create repolayer.yml
 # edit repolayer.yml to point at your repos, then:
-repolayer build            # writes .repolayer/index.db
-repolayer query "auth"     # substring search across symbols
+repolayer build                  # full build → .repolayer/index.db
+repolayer query "auth"           # substring search
+repolayer update                 # incremental re-index of changed files
+repolayer serve                  # start MCP server (stdio, for Claude Code)
 ```
 
 ## Configuration (`repolayer.yml`)
@@ -37,25 +49,42 @@ repolayer query "auth"     # substring search across symbols
 ```yaml
 repos:
   - path: ./
-  # - path: ../another_repo
-  # - path: ../my_idl_repo
-  #   type: idl   # IDL repos are recognised but not yet indexed (Phase 2)
+  - path: ../another_repo
+  - path: ../my_idl_repo
+    type: idl                # IDL repos define cross-cutting service contracts
 
-# Optional: manual cross-repo links (Phase 2)
-# links:
-#   - from: bff
-#     to: backend_api
-#     kind: http
+# Optional: declare cross-repo dependencies that aren't visible from import statements
+links:
+  - from: bff
+    to: backend_api
+    kind: http               # or rpc / calls / invokes
 
-# Optional: LLM-driven summaries / query translation (Phase 3)
+# Optional (Phase 3, not yet wired): LLM-driven summaries / query translation
 # llm:
 #   enabled: false
+#   provider: anthropic
+#   api_key_env: ANTHROPIC_API_KEY
+```
+
+## Connecting to Claude Code
+
+Add to your Claude Code MCP config:
+
+```json
+{
+  "mcpServers": {
+    "repolayer": {
+      "command": "/path/to/repolayer",
+      "args": ["serve"],
+      "cwd": "/path/to/your/workspace"
+    }
+  }
+}
 ```
 
 ## Roadmap
 
-- **Phase 2**: Go parser, multi-repo cross-package import resolution, protobuf / thrift IDL graph, MCP server with 5 tools (`find_context`, `get_symbol`, `get_callers`, `get_dependencies`, `list_repos`), incremental updates via `git diff`.
-- **Phase 3**: Optional LLM enhancement (Anthropic / DeepSeek summaries, embedding-based reranking), real-world dogfooding, public `v0.1.0` release with cross-platform binaries.
+- **Phase 3** (in progress): optional LLM enhancement (Anthropic / DeepSeek summaries, embedding-based reranking), real-world dogfooding on multi-repo microservice systems, public `v0.1.0` release with cross-platform binaries via `cargo-dist`.
 
 ## Why Rust?
 

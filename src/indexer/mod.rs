@@ -56,6 +56,8 @@ impl Indexer {
 
     pub fn build_all(&mut self) -> Result<BuildStats> {
         let mut stats = BuildStats::default();
+        let pkg_index =
+            crate::linker::imports::PackageIndex::build(&self.workspace_root, &self.config)?;
         let repos = self.config.repos.clone();
         for repo_cfg in &repos {
             if repo_cfg.is_idl() {
@@ -69,7 +71,7 @@ impl Indexer {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "repo".to_string())
             });
-            self.index_repo(&repo_name, &repo_path, &mut stats)?;
+            self.index_repo(&repo_name, &repo_path, &pkg_index, &mut stats)?;
         }
         Ok(stats)
     }
@@ -82,7 +84,13 @@ impl Indexer {
         }
     }
 
-    fn index_repo(&mut self, repo: &str, root: &Path, stats: &mut BuildStats) -> Result<()> {
+    fn index_repo(
+        &mut self,
+        repo: &str,
+        root: &Path,
+        pkg_index: &crate::linker::imports::PackageIndex,
+        stats: &mut BuildStats,
+    ) -> Result<()> {
         info!("indexing repo {} at {}", repo, root.display());
         let repo_node = Node::new(NodeKind::Repo, repo, "", None);
         self.store.upsert_node(&repo_node)?;
@@ -159,8 +167,35 @@ impl Indexer {
                         kind: EdgeKind::Imports,
                     })?;
                     stats.edges += 1;
+                } else if let Some(pkg) = pkg_index.lookup(imp) {
+                    // Cross-repo import: link to the target package's main module (or root)
+                    let target_rel = pkg
+                        .main_relative
+                        .clone()
+                        .unwrap_or_else(|| "package.json".to_string());
+                    let target_module = Node::new(NodeKind::Module, &pkg.repo, &target_rel, None);
+                    self.store.upsert_node(&target_module)?;
+                    // If we synthesized the path (no `main` field), explicitly connect it to the
+                    // target repo node so it's not orphaned. Walker won't create this node for us
+                    // because package.json isn't a .ts/.py/.go file.
+                    if pkg.main_relative.is_none() {
+                        let target_repo_node = Node::new(NodeKind::Repo, &pkg.repo, "", None);
+                        self.store.upsert_edge(&Edge {
+                            from: target_repo_node.id,
+                            to: target_module.id.clone(),
+                            kind: EdgeKind::Contains,
+                        })?;
+                        // Don't bump stats.edges — this synthesized Contains is a side effect of
+                        // the Imports edge we're creating, not a primary traversal edge.
+                    }
+                    self.store.upsert_edge(&Edge {
+                        from: module_node.id.clone(),
+                        to: target_module.id,
+                        kind: EdgeKind::Imports,
+                    })?;
+                    stats.edges += 1;
                 }
-                // External package imports (no leading '.') are handled by Task 11 linker.
+                // Otherwise: external dep not in our workspace, skip silently.
             }
         }
         Ok(())

@@ -1,4 +1,4 @@
-use crate::parser::treesitter::{node_text, parse_with};
+use crate::parser::treesitter::{extract_named_symbol, node_text, parse_with};
 use crate::parser::{ExportedSymbol, ParsedFile, Parser, SymbolKind};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -67,43 +67,38 @@ fn extract_export(node: tree_sitter::Node, bytes: &[u8], out: &mut Vec<ExportedS
     for child in node.named_children(&mut cursor) {
         match child.kind() {
             "function_declaration" => {
-                push_simple(child, bytes, SymbolKind::Function, out);
+                if let Some(sym) =
+                    extract_named_symbol(child, child, bytes, SymbolKind::Function, |_| true)
+                {
+                    out.push(sym);
+                }
             }
             "class_declaration" => {
-                push_simple(child, bytes, SymbolKind::Class, out);
+                if let Some(sym) =
+                    extract_named_symbol(child, child, bytes, SymbolKind::Class, |_| true)
+                {
+                    out.push(sym);
+                }
             }
             "interface_declaration" => {
-                push_simple(child, bytes, SymbolKind::Interface, out);
+                if let Some(sym) =
+                    extract_named_symbol(child, child, bytes, SymbolKind::Interface, |_| true)
+                {
+                    out.push(sym);
+                }
             }
             "type_alias_declaration" => {
-                push_simple(child, bytes, SymbolKind::TypeAlias, out);
+                if let Some(sym) =
+                    extract_named_symbol(child, child, bytes, SymbolKind::TypeAlias, |_| true)
+                {
+                    out.push(sym);
+                }
             }
             "lexical_declaration" | "variable_declaration" => {
                 push_variable_declarators(child, bytes, out);
             }
             _ => {}
         }
-    }
-}
-
-fn push_simple(
-    node: tree_sitter::Node,
-    bytes: &[u8],
-    kind: SymbolKind,
-    out: &mut Vec<ExportedSymbol>,
-) {
-    if let Some(name) = node
-        .child_by_field_name("name")
-        .map(|n| node_text(n, bytes).to_string())
-    {
-        let start = node.start_position().row as u32 + 1;
-        let end = node.end_position().row as u32 + 1;
-        out.push(ExportedSymbol {
-            name,
-            kind,
-            loc_start: start,
-            loc_end: end,
-        });
     }
 }
 

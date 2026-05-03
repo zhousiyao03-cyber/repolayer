@@ -1,3 +1,4 @@
+pub mod python;
 pub mod treesitter;
 pub mod typescript;
 

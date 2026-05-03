@@ -73,6 +73,7 @@ impl Indexer {
         stats.nodes += 1;
 
         let ts_parser = TypeScriptParser::new();
+        let py_parser = crate::parser::python::PythonParser::new();
 
         for entry in WalkBuilder::new(root).build() {
             let entry = match entry {
@@ -91,6 +92,13 @@ impl Indexer {
 
             let parsed = match ext {
                 "ts" | "tsx" | "js" | "jsx" | "mjs" => match ts_parser.parse_file(path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        warn!("skip {}: {}", path.display(), e);
+                        continue;
+                    }
+                },
+                "py" => match py_parser.parse_file(path) {
                     Ok(p) => p,
                     Err(e) => {
                         warn!("skip {}: {}", path.display(), e);

@@ -56,7 +56,7 @@ impl Indexer {
         })
     }
 
-    pub fn build_all(&mut self) -> Result<BuildStats> {
+    pub async fn build_all(&mut self) -> Result<BuildStats> {
         let mut stats = BuildStats::default();
         let pkg_index =
             crate::linker::imports::PackageIndex::build(&self.workspace_root, &self.config)?;
@@ -102,6 +102,44 @@ impl Indexer {
         // Apply user-declared manual links (repolayer.yml links: section)
         let manual_edges = crate::linker::manual::apply_manual_links(&self.store, &self.config)?;
         stats.edges += manual_edges;
+
+        // Optional LLM-driven summaries
+        if let Some(llm_cfg) = &self.config.llm.clone() {
+            if llm_cfg.enabled && llm_cfg.summary {
+                match build_llm_provider(llm_cfg) {
+                    Ok(provider) => {
+                        let code_repos: Vec<(String, PathBuf)> = self
+                            .config
+                            .repos
+                            .iter()
+                            .filter(|r| !r.is_idl())
+                            .map(|r| {
+                                let root = self.resolve_repo_path(&r.path);
+                                let name = r.name.clone().unwrap_or_else(|| {
+                                    root.file_name()
+                                        .map(|n| n.to_string_lossy().to_string())
+                                        .unwrap_or_else(|| "repo".to_string())
+                                });
+                                (name, root)
+                            })
+                            .collect();
+                        if let Err(e) = crate::llm::summary::summarize_modules(
+                            &self.store,
+                            provider,
+                            &code_repos,
+                        )
+                        .await
+                        {
+                            warn!("LLM summary phase failed (continuing): {}", e);
+                        }
+                    }
+                    Err(e) => warn!(
+                        "LLM provider construction failed (skipping summaries): {}",
+                        e
+                    ),
+                }
+            }
+        }
 
         Ok(stats)
     }
@@ -369,6 +407,22 @@ impl Indexer {
             }
         }
         Ok(())
+    }
+}
+
+fn build_llm_provider(
+    cfg: &crate::config::LlmConfig,
+) -> Result<std::sync::Arc<dyn crate::llm::LlmProvider>> {
+    let api_key = std::env::var(&cfg.api_key_env)
+        .with_context(|| format!("env var {} not set", cfg.api_key_env))?;
+    match cfg.provider.as_str() {
+        "anthropic" => Ok(std::sync::Arc::new(
+            crate::llm::anthropic::AnthropicProvider::new(&api_key, "https://api.anthropic.com"),
+        )),
+        "deepseek" => Ok(std::sync::Arc::new(
+            crate::llm::deepseek::DeepSeekProvider::new(&api_key, "https://api.deepseek.com"),
+        )),
+        other => anyhow::bail!("unknown LLM provider: {}", other),
     }
 }
 

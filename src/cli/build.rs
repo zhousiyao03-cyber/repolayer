@@ -9,7 +9,7 @@ pub async fn run() -> Result<()> {
     let cfg = Config::from_path(&cfg_path)?;
     let db_path = workspace.join(".repolayer").join("index.db");
     let mut indexer = Indexer::new(workspace, db_path.clone(), cfg)?;
-    let stats = indexer.build_all()?;
+    let stats = indexer.build_all().await?;
     info!(
         "indexed {} nodes, {} edges → {}",
         stats.nodes,

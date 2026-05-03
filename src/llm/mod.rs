@@ -1,5 +1,6 @@
 pub mod anthropic;
 pub mod deepseek;
+pub mod summary;
 
 use anyhow::Result;
 use async_trait::async_trait;

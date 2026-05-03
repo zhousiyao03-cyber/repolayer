@@ -1,6 +1,9 @@
 use anyhow::Result;
 use clap::Subcommand;
 
+pub mod build;
+pub mod init;
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Initialize a repolayer.yml in current directory
@@ -23,11 +26,11 @@ pub enum Command {
 
 pub async fn run(cmd: Command) -> Result<()> {
     match cmd {
-        Command::Init => anyhow::bail!("not implemented"),
-        Command::Build => anyhow::bail!("not implemented"),
-        Command::Update => anyhow::bail!("not implemented"),
-        Command::Query { .. } => anyhow::bail!("not implemented"),
-        Command::Callers { .. } => anyhow::bail!("not implemented"),
-        Command::Serve { .. } => anyhow::bail!("not implemented"),
+        Command::Init => init::run().await,
+        Command::Build => build::run().await,
+        Command::Update => anyhow::bail!("not implemented yet"),
+        Command::Query { .. } => anyhow::bail!("not implemented yet"),
+        Command::Callers { .. } => anyhow::bail!("not implemented yet"),
+        Command::Serve { .. } => anyhow::bail!("not implemented yet"),
     }
 }

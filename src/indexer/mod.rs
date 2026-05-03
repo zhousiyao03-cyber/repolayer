@@ -60,10 +60,6 @@ impl Indexer {
             crate::linker::imports::PackageIndex::build(&self.workspace_root, &self.config)?;
         let repos = self.config.repos.clone();
         for repo_cfg in &repos {
-            if repo_cfg.is_idl() {
-                // IDL repos handled in Task 14
-                continue;
-            }
             let repo_path = self.resolve_repo_path(&repo_cfg.path);
             let repo_name = repo_cfg.name.clone().unwrap_or_else(|| {
                 repo_path
@@ -71,9 +67,105 @@ impl Indexer {
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "repo".to_string())
             });
+            if repo_cfg.is_idl() {
+                self.index_idl_repo(&repo_name, &repo_path, &mut stats)?;
+                continue;
+            }
             self.index_repo(&repo_name, &repo_path, &pkg_index, &mut stats)?;
         }
+
+        // After all repos indexed, link IDL methods to code modules
+        let code_repos: Vec<(String, PathBuf)> = self
+            .config
+            .repos
+            .iter()
+            .filter(|r| !r.is_idl())
+            .map(|r| {
+                let root = self.resolve_repo_path(&r.path);
+                let name = r.name.clone().unwrap_or_else(|| {
+                    root.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "repo".to_string())
+                });
+                (name, root)
+            })
+            .collect();
+        let linker = crate::linker::idl_links::IdlLinker {
+            store: &self.store,
+            repos: code_repos,
+        };
+        let idl_edges = linker.link_all()?;
+        stats.edges += idl_edges;
+
         Ok(stats)
+    }
+
+    fn index_idl_repo(&mut self, repo: &str, root: &Path, stats: &mut BuildStats) -> Result<()> {
+        use crate::parser::idl::{protobuf::ProtobufParser, thrift::ThriftParser};
+        let proto_p = ProtobufParser::new();
+        let thrift_p = ThriftParser::new();
+
+        info!("indexing IDL repo {} at {}", repo, root.display());
+        let repo_node = Node::new(NodeKind::Repo, repo, "", None);
+        self.store.upsert_node(&repo_node)?;
+        stats.nodes += 1;
+
+        for entry in WalkBuilder::new(root).build() {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                continue;
+            }
+            let path = entry.path();
+            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+            let rel = rel_path_str(path.strip_prefix(root).unwrap_or(path));
+
+            let idl = match ext {
+                "proto" => match proto_p.parse(path) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        warn!("skip {}: {}", path.display(), e);
+                        continue;
+                    }
+                },
+                "thrift" => match thrift_p.parse(path) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        warn!("skip {}: {}", path.display(), e);
+                        continue;
+                    }
+                },
+                _ => continue,
+            };
+
+            for svc in &idl.services {
+                let svc_node = Node::new(NodeKind::IdlService, repo, &rel, Some(&svc.name));
+                self.store.upsert_node(&svc_node)?;
+                self.store.upsert_edge(&Edge {
+                    from: repo_node.id.clone(),
+                    to: svc_node.id.clone(),
+                    kind: EdgeKind::Defines,
+                })?;
+                stats.nodes += 1;
+                stats.edges += 1;
+
+                for m in &svc.methods {
+                    let qualified = format!("{}.{}", svc.name, m.name);
+                    let m_node = Node::new(NodeKind::IdlMethod, repo, &rel, Some(&qualified));
+                    self.store.upsert_node(&m_node)?;
+                    self.store.upsert_edge(&Edge {
+                        from: svc_node.id.clone(),
+                        to: m_node.id.clone(),
+                        kind: EdgeKind::Contains,
+                    })?;
+                    stats.nodes += 1;
+                    stats.edges += 1;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn resolve_repo_path(&self, p: &Path) -> PathBuf {

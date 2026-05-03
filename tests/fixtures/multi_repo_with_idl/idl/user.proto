@@ -1,0 +1,12 @@
+syntax = "proto3";
+package promotion.member;
+
+service MemberBenefitService {
+  rpc GetBenefit(GetBenefitRequest) returns (GetBenefitResponse);
+  rpc Redeem(RedeemRequest) returns (RedeemResponse);
+}
+
+message GetBenefitRequest { int64 user_id = 1; }
+message GetBenefitResponse { string benefit_id = 1; }
+message RedeemRequest { string benefit_id = 1; }
+message RedeemResponse { bool ok = 1; }

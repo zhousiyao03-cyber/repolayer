@@ -174,6 +174,18 @@ impl Store {
         Ok(edges)
     }
 
+    pub fn list_nodes_by_kind(&self, kind: NodeKind) -> Result<Vec<Node>> {
+        let kind_str = kind_to_db(kind)?;
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, repo, path, symbol, summary, owner, loc_start, loc_end
+             FROM nodes WHERE kind = ?1",
+        )?;
+        let rows = stmt
+            .query_map(params![kind_str], row_to_node)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn search_symbols_substring(&self, q: &str, limit: usize) -> Result<Vec<Node>> {
         let escaped = q
             .replace('\\', "\\\\")

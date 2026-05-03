@@ -1,0 +1,19 @@
+repos:
+  - path: ../promotion_member
+  - path: ../promotion_benefit
+  - path: ../promotion_fulfillment
+  - path: ../mall_bff_sdk
+  - path: ../http_idl
+    type: idl
+
+links:
+  - from: mall_bff_sdk
+    to: promotion_member_api
+    kind: http
+
+llm:
+  enabled: true
+  provider: anthropic
+  api_key_env: ANTHROPIC_API_KEY
+  summary: true
+  query_translation: true

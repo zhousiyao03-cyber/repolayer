@@ -4,3 +4,4 @@ pub mod graph;
 pub mod indexer;
 pub mod linker;
 pub mod parser;
+pub mod query;

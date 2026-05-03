@@ -97,6 +97,10 @@ impl Indexer {
         let idl_edges = linker.link_all()?;
         stats.edges += idl_edges;
 
+        // Apply user-declared manual links (repolayer.yml links: section)
+        let manual_edges = crate::linker::manual::apply_manual_links(&self.store, &self.config)?;
+        stats.edges += manual_edges;
+
         Ok(stats)
     }
 

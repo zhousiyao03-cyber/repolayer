@@ -1,3 +1,5 @@
+pub mod incremental;
+
 use crate::config::Config;
 use crate::graph::model::*;
 use crate::graph::store::Store;
@@ -168,6 +170,78 @@ impl Indexer {
                     stats.edges += 1;
                 }
             }
+        }
+        Ok(())
+    }
+
+    pub fn reindex_file(&mut self, repo: &str, abs_path: &Path) -> Result<()> {
+        use crate::parser::Parser as _;
+
+        // Find the repo's root from config
+        let repo_cfg = self.config.repos.iter().find(|r| {
+            let root = self.resolve_repo_path(&r.path);
+            root.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+                == repo
+        });
+        let Some(rcfg) = repo_cfg.cloned() else {
+            return Ok(());
+        };
+        let root = self.resolve_repo_path(&rcfg.path);
+        let Ok(rel_path) = abs_path.strip_prefix(&root) else {
+            return Ok(());
+        };
+        let rel = rel_path_str(rel_path);
+
+        // Delete existing nodes for this module
+        self.store.delete_module(repo, &rel)?;
+
+        // If file no longer exists (deleted), we're done after delete
+        if !abs_path.exists() {
+            return Ok(());
+        }
+
+        let ext = abs_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        let ts_parser = crate::parser::typescript::TypeScriptParser::new();
+        let py_parser = crate::parser::python::PythonParser::new();
+        let go_parser = crate::parser::go::GoParser::new();
+
+        let parsed = match ext {
+            "ts" | "tsx" | "js" | "jsx" | "mjs" => match ts_parser.parse_file(abs_path) {
+                Ok(p) => p,
+                Err(_) => return Ok(()),
+            },
+            "py" => match py_parser.parse_file(abs_path) {
+                Ok(p) => p,
+                Err(_) => return Ok(()),
+            },
+            "go" => match go_parser.parse_file(abs_path) {
+                Ok(p) => p,
+                Err(_) => return Ok(()),
+            },
+            _ => return Ok(()),
+        };
+
+        let repo_node = Node::new(NodeKind::Repo, repo, "", None);
+        self.store.upsert_node(&repo_node)?;
+        let module_node = Node::new(NodeKind::Module, repo, &rel, None);
+        self.store.upsert_node(&module_node)?;
+        self.store.upsert_edge(&Edge {
+            from: repo_node.id,
+            to: module_node.id.clone(),
+            kind: EdgeKind::Contains,
+        })?;
+        for sym in &parsed.symbols {
+            let mut sn = Node::new(NodeKind::Symbol, repo, &rel, Some(&sym.name));
+            sn.loc_start = Some(sym.loc_start);
+            sn.loc_end = Some(sym.loc_end);
+            self.store.upsert_node(&sn)?;
+            self.store.upsert_edge(&Edge {
+                from: module_node.id.clone(),
+                to: sn.id,
+                kind: EdgeKind::Contains,
+            })?;
         }
         Ok(())
     }

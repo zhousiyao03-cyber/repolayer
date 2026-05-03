@@ -32,12 +32,14 @@ ignore = "0.4"
 regex = "1.10"
 rmcp = { version = "1.6.0", features = ["server", "transport-io", "macros"] }
 schemars = "1"
+git2 = "0.19"
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.1"
 insta = { version = "1.40", features = ["yaml"] }
 tempfile = "3.13"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [lib]
 name = "repolayer"

@@ -192,6 +192,19 @@ impl Store {
         Ok(rows)
     }
 
+    pub fn delete_module(&self, repo: &str, path: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM nodes WHERE repo = ?1 AND path = ?2",
+            params![repo, path],
+        )?;
+        // Clean up dangling edges that reference deleted nodes
+        self.conn.execute(
+            "DELETE FROM edges WHERE from_id NOT IN (SELECT id FROM nodes) OR to_id NOT IN (SELECT id FROM nodes)",
+            [],
+        )?;
+        Ok(())
+    }
+
     pub fn search_symbols_substring(&self, q: &str, limit: usize) -> Result<Vec<Node>> {
         let escaped = q
             .replace('\\', "\\\\")

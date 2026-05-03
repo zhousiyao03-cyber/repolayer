@@ -5,6 +5,7 @@ pub mod build;
 pub mod init;
 pub mod query;
 pub mod serve;
+pub mod update;
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -30,7 +31,7 @@ pub async fn run(cmd: Command) -> Result<()> {
     match cmd {
         Command::Init => init::run().await,
         Command::Build => build::run().await,
-        Command::Update => anyhow::bail!("not implemented yet"),
+        Command::Update => update::run().await,
         Command::Query { text } => query::run(text).await,
         Command::Callers { .. } => anyhow::bail!("not implemented yet"),
         Command::Serve { http } => serve::run(http).await,

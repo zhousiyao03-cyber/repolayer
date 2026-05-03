@@ -4,6 +4,7 @@ use clap::Subcommand;
 pub mod build;
 pub mod init;
 pub mod query;
+pub mod serve;
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -32,6 +33,6 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Update => anyhow::bail!("not implemented yet"),
         Command::Query { text } => query::run(text).await,
         Command::Callers { .. } => anyhow::bail!("not implemented yet"),
-        Command::Serve { .. } => anyhow::bail!("not implemented yet"),
+        Command::Serve { http } => serve::run(http).await,
     }
 }

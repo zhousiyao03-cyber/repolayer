@@ -3,6 +3,12 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
+/// Single-threaded handle to the SQLite-backed graph store.
+///
+/// `rusqlite::Connection` is `Send` but `!Sync`, so this struct cannot be
+/// shared across async tasks via `Arc<Store>` directly. For multi-threaded use
+/// (e.g. the MCP server in `crate::mcp`), wrap in `Arc<tokio::sync::Mutex<Store>>`,
+/// or open a fresh `Store` per request and let SQLite's file lock coordinate.
 pub struct Store {
     conn: Connection,
 }

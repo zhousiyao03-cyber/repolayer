@@ -3,5 +3,6 @@ pub mod config;
 pub mod graph;
 pub mod indexer;
 pub mod linker;
+pub mod mcp;
 pub mod parser;
 pub mod query;

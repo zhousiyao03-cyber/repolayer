@@ -736,6 +736,7 @@ dependencies = [
  "ignore",
  "insta",
  "predicates",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",

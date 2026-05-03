@@ -29,6 +29,7 @@ tree-sitter-javascript = "0.23"
 tree-sitter-go = "0.23"
 tree-sitter-python = "0.23"
 ignore = "0.4"
+regex = "1.10"
 
 [dev-dependencies]
 assert_cmd = "2.0"

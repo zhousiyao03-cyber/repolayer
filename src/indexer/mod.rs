@@ -1,8 +1,24 @@
 use crate::config::Config;
 use crate::graph::model::*;
 use crate::graph::store::Store;
-use crate::parser::{typescript::TypeScriptParser, Parser as _};
+use crate::parser::typescript::TypeScriptParser;
 use anyhow::{Context, Result};
+
+fn parse_by_extension(
+    path: &std::path::Path,
+    ts_parser: &crate::parser::typescript::TypeScriptParser,
+    py_parser: &crate::parser::python::PythonParser,
+    go_parser: &crate::parser::go::GoParser,
+) -> Option<Result<crate::parser::ParsedFile>> {
+    use crate::parser::Parser as _;
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    match ext {
+        "ts" | "tsx" | "js" | "jsx" | "mjs" => Some(ts_parser.parse_file(path)),
+        "py" => Some(py_parser.parse_file(path)),
+        "go" => Some(go_parser.parse_file(path)),
+        _ => None,
+    }
+}
 use ignore::WalkBuilder;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
@@ -74,6 +90,7 @@ impl Indexer {
 
         let ts_parser = TypeScriptParser::new();
         let py_parser = crate::parser::python::PythonParser::new();
+        let go_parser = crate::parser::go::GoParser::new();
 
         for entry in WalkBuilder::new(root).build() {
             let entry = match entry {
@@ -88,24 +105,13 @@ impl Indexer {
             }
             let path = entry.path();
             let rel = rel_path_str(path.strip_prefix(root).unwrap_or(path));
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-
-            let parsed = match ext {
-                "ts" | "tsx" | "js" | "jsx" | "mjs" => match ts_parser.parse_file(path) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        warn!("skip {}: {}", path.display(), e);
-                        continue;
-                    }
-                },
-                "py" => match py_parser.parse_file(path) {
-                    Ok(p) => p,
-                    Err(e) => {
-                        warn!("skip {}: {}", path.display(), e);
-                        continue;
-                    }
-                },
-                _ => continue,
+            let parsed = match parse_by_extension(path, &ts_parser, &py_parser, &go_parser) {
+                None => continue,
+                Some(Err(e)) => {
+                    warn!("skip {}: {}", path.display(), e);
+                    continue;
+                }
+                Some(Ok(p)) => p,
             };
 
             let module_node = Node::new(NodeKind::Module, repo, &rel, None);

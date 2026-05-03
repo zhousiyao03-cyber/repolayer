@@ -2,15 +2,35 @@ use repolayer::graph::model::*;
 
 #[test]
 fn node_id_is_stable_across_runs() {
-    let a = Node::new(NodeKind::Symbol, "promotion_member", "src/auth.ts", Some("login"));
-    let b = Node::new(NodeKind::Symbol, "promotion_member", "src/auth.ts", Some("login"));
+    let a = Node::new(
+        NodeKind::Symbol,
+        "promotion_member",
+        "src/auth.ts",
+        Some("login"),
+    );
+    let b = Node::new(
+        NodeKind::Symbol,
+        "promotion_member",
+        "src/auth.ts",
+        Some("login"),
+    );
     assert_eq!(a.id, b.id);
 }
 
 #[test]
 fn different_symbols_get_different_ids() {
-    let a = Node::new(NodeKind::Symbol, "promotion_member", "src/auth.ts", Some("login"));
-    let b = Node::new(NodeKind::Symbol, "promotion_member", "src/auth.ts", Some("logout"));
+    let a = Node::new(
+        NodeKind::Symbol,
+        "promotion_member",
+        "src/auth.ts",
+        Some("login"),
+    );
+    let b = Node::new(
+        NodeKind::Symbol,
+        "promotion_member",
+        "src/auth.ts",
+        Some("logout"),
+    );
     assert_ne!(a.id, b.id);
 }
 

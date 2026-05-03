@@ -51,7 +51,9 @@ impl Store {
     }
 
     pub fn count_nodes(&self) -> Result<i64> {
-        Ok(self.conn.query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))?)
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))?)
     }
 
     pub fn upsert_node(&self, n: &Node) -> Result<()> {
@@ -67,8 +69,15 @@ impl Store {
                 symbol=excluded.symbol, summary=excluded.summary, owner=excluded.owner,
                 loc_start=excluded.loc_start, loc_end=excluded.loc_end",
             params![
-                n.id, kind, n.repo, n.path, n.symbol, n.summary,
-                n.owner, n.loc_start, n.loc_end,
+                n.id,
+                kind,
+                n.repo,
+                n.path,
+                n.symbol,
+                n.summary,
+                n.owner,
+                n.loc_start,
+                n.loc_end,
             ],
         )?;
         Ok(())
@@ -117,15 +126,25 @@ impl Store {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("edge kind serialization failed"))?
             .to_string();
-        let mut stmt = self.conn.prepare(
-            "SELECT from_id, to_id, kind FROM edges WHERE from_id = ?1 AND kind = ?2",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT from_id, to_id, kind FROM edges WHERE from_id = ?1 AND kind = ?2")?;
         let edges = stmt
             .query_map(params![from, kind_str], |row| {
                 let k: String = row.get(2)?;
-                let kind: EdgeKind = serde_json::from_value(serde_json::Value::String(k))
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e)))?;
-                Ok(Edge { from: row.get(0)?, to: row.get(1)?, kind })
+                let kind: EdgeKind =
+                    serde_json::from_value(serde_json::Value::String(k)).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?;
+                Ok(Edge {
+                    from: row.get(0)?,
+                    to: row.get(1)?,
+                    kind,
+                })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(edges)
@@ -136,15 +155,25 @@ impl Store {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("edge kind serialization failed"))?
             .to_string();
-        let mut stmt = self.conn.prepare(
-            "SELECT from_id, to_id, kind FROM edges WHERE to_id = ?1 AND kind = ?2",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT from_id, to_id, kind FROM edges WHERE to_id = ?1 AND kind = ?2")?;
         let edges = stmt
             .query_map(params![to, kind_str], |row| {
                 let k: String = row.get(2)?;
-                let kind: EdgeKind = serde_json::from_value(serde_json::Value::String(k))
-                    .map_err(|e| rusqlite::Error::FromSqlConversionFailure(2, rusqlite::types::Type::Text, Box::new(e)))?;
-                Ok(Edge { from: row.get(0)?, to: row.get(1)?, kind })
+                let kind: EdgeKind =
+                    serde_json::from_value(serde_json::Value::String(k)).map_err(|e| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            2,
+                            rusqlite::types::Type::Text,
+                            Box::new(e),
+                        )
+                    })?;
+                Ok(Edge {
+                    from: row.get(0)?,
+                    to: row.get(1)?,
+                    kind,
+                })
             })?
             .collect::<Result<Vec<_>, _>>()?;
         Ok(edges)

@@ -24,5 +24,9 @@ fn loads_full_config_with_idl_and_links() {
 fn missing_file_returns_clear_error() {
     let err = Config::from_path(&PathBuf::from("/no/such/file")).unwrap_err();
     let msg = err.to_string();
-    assert!(msg.contains("not found") || msg.contains("No such file"), "got: {}", msg);
+    assert!(
+        msg.contains("not found") || msg.contains("No such file"),
+        "got: {}",
+        msg
+    );
 }

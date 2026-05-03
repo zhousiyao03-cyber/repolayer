@@ -41,7 +41,11 @@ fn insert_edge_and_query() {
     let b = Node::new(NodeKind::Symbol, "r", "b.ts", Some("bar"));
     store.upsert_node(&a).unwrap();
     store.upsert_node(&b).unwrap();
-    let e = Edge { from: a.id.clone(), to: b.id.clone(), kind: EdgeKind::Calls };
+    let e = Edge {
+        from: a.id.clone(),
+        to: b.id.clone(),
+        kind: EdgeKind::Calls,
+    };
     store.upsert_edge(&e).unwrap();
     let outgoing = store.outgoing_edges(&a.id, EdgeKind::Calls).unwrap();
     assert_eq!(outgoing.len(), 1);

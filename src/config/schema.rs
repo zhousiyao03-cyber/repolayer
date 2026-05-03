@@ -47,4 +47,7 @@ pub struct LlmConfig {
     pub summary: bool,
     #[serde(default)]
     pub query_translation: bool,
+    /// Enable embedding-based reranking in find_context (TODO v0.2 — currently no-op).
+    #[serde(default)]
+    pub embedding: bool,
 }

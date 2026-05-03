@@ -1,5 +1,6 @@
 pub mod anthropic;
 pub mod deepseek;
+pub mod embedding;
 pub mod summary;
 
 use anyhow::Result;

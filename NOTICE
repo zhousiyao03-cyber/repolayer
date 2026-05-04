@@ -8,6 +8,11 @@ Components copied or adapted from ast-outline:
   - src/core/declaration.rs, src/core/markers.rs, src/core/schema.rs
     (split from aeroxy src/core.rs)
   - src/adapters/* (except idl/)
+  - src/deps/* (except store.rs which is repolayer-original)
+  - src/search/* (except store.rs which is repolayer-original)
+  - src/surface/imports.rs
+  - src/file_filter.rs
+  - src/outline/render.rs (renderers section of aeroxy src/core.rs)
 
 Local patches on top of adopted code:
   - src/adapters/kotlin.rs: added _name_or_child_identifier helper
@@ -15,6 +20,8 @@ Local patches on top of adopted code:
     simple_identifier) rather than named fields for declaration names.
     Upstream's field_text(node, "name") returns None for every kotlin
     declaration, leaving names as "?". Patch isolated; rest verbatim.
+  - src/deps/scc.rs and src/deps/traverse.rs: minor clippy fixes
+    (manual_contains, ptr_arg) — semantically equivalent to upstream.
 
 The following components are original to repolayer:
   - cross-repo workspace model (config/, linker/)

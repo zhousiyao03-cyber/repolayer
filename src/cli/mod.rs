@@ -45,6 +45,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Compact public API map of a module (one-page overview, signatures only)
+    Digest {
+        /// Files or directories to digest
+        paths: Vec<PathBuf>,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -57,5 +65,6 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Serve { http } => serve::run(http).await,
         Command::Outline { paths, json } => compat::outline::run(paths, json).await,
         Command::Show { file, symbols, json } => compat::show::run(file, symbols, json).await,
+        Command::Digest { paths, json } => compat::digest::run(paths, json).await,
     }
 }

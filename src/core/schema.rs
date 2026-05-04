@@ -3,6 +3,7 @@
 
 pub const JSON_SCHEMA_OUTLINE: &str = "ast-outline.outline.v1";
 pub const JSON_SCHEMA_SHOW: &str = "ast-outline.show.v1";
+pub const JSON_SCHEMA_DIGEST: &str = "ast-outline.digest.v1";
 pub const JSON_SCHEMA_IMPLEMENTS: &str = "ast-outline.implements.v1";
 pub const JSON_SCHEMA_SURFACE: &str = "ast-outline.surface.v1";
 pub const JSON_SCHEMA_DEPS: &str = "ast-outline.deps.v1";

@@ -11,7 +11,7 @@ use rmcp::{
 };
 use std::sync::{Arc, Mutex};
 use tools::{FindContextArgs, FindIdlImplArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
-use tools_compat::{OutlineArgs, ShowArgs};
+use tools_compat::{DigestArgs, OutlineArgs, ShowArgs};
 
 /// MCP server exposing repolayer's 5 query tools via stdio transport.
 ///
@@ -111,6 +111,16 @@ impl RepolayerServer {
         Parameters(args): Parameters<ShowArgs>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         into_result(self.tools.show(args))
+    }
+
+    #[rmcp::tool(
+        description = "Compact public API map of a module (one-page overview, signatures only). Pass file or directory paths; directories are walked recursively, honouring .gitignore. Set json=true for a machine-readable schema-versioned response."
+    )]
+    fn digest(
+        &self,
+        Parameters(args): Parameters<DigestArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.digest(args))
     }
 }
 

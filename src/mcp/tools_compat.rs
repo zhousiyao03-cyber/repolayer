@@ -36,6 +36,18 @@ pub struct ShowArgs {
     pub json: bool,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DigestArgs {
+    /// Files or directories to digest. Each entry may be an absolute or
+    /// relative path; directories are walked recursively, honouring
+    /// `.gitignore`.
+    pub paths: Vec<String>,
+    /// If true, return machine-readable JSON (schema `ast-outline.digest.v1`)
+    /// instead of the human-readable terminal format.
+    #[serde(default)]
+    pub json: bool,
+}
+
 impl Tools {
     /// Extract the source body of one or more symbols from a file.
     pub fn show(&self, args: ShowArgs) -> anyhow::Result<Value> {
@@ -136,6 +148,61 @@ impl Tools {
                 "schema_version": JSON_SCHEMA_OUTLINE,
                 "format": "text",
                 "files": text_chunks,
+            }))
+        }
+    }
+}
+
+impl Tools {
+    /// Digest one or more files / directories (compact public API map).
+    /// Returns either the terminal-formatted text or a schema-versioned JSON document.
+    pub fn digest(&self, args: DigestArgs) -> anyhow::Result<Value> {
+        use crate::adapters::parse_file;
+        use crate::core::declaration::DigestOptions;
+        use crate::core::schema::JSON_SCHEMA_DIGEST;
+        use crate::outline::render::render_digest;
+        use std::path::Path;
+
+        let opts = DigestOptions::default();
+        let mut results = Vec::new();
+
+        for spec in &args.paths {
+            let path = Path::new(spec);
+            if path.is_file() {
+                if let Some(pr) = parse_file(path) {
+                    results.push(pr);
+                }
+            } else if path.is_dir() {
+                for entry in ignore::WalkBuilder::new(path).build().flatten() {
+                    if entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                        if let Some(pr) = parse_file(entry.path()) {
+                            results.push(pr);
+                        }
+                    }
+                }
+            }
+            // unknown / missing paths are silently skipped (MCP callers should
+            // validate paths before calling — we don't want to error the whole
+            // request for one bad entry).
+        }
+
+        if args.json {
+            // JSON mode: serialize as an envelope with file results.
+            let files: Vec<Value> = results
+                .iter()
+                .map(|pr| serde_json::to_value(pr).unwrap())
+                .collect();
+            Ok(serde_json::json!({
+                "schema_version": JSON_SCHEMA_DIGEST,
+                "files": files,
+            }))
+        } else {
+            // Plain text: use render_digest and wrap in envelope.
+            let text = render_digest(&results, &opts, None);
+            Ok(serde_json::json!({
+                "schema_version": JSON_SCHEMA_DIGEST,
+                "format": "text",
+                "text": text,
             }))
         }
     }

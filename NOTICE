@@ -1,0 +1,16 @@
+This product includes software developed by:
+
+  ast-outline (https://github.com/aeroxy/ast-outline)
+  Copyright (c) 2026 Aero <aero.windwalker@gmail.com>
+  Licensed under the MIT License.
+
+Components copied or adapted from ast-outline:
+  - src/core/declaration.rs, src/core/markers.rs, src/core/schema.rs
+    (split from aeroxy src/core.rs)
+  - src/adapters/* (except idl/)
+
+The following components are original to repolayer:
+  - cross-repo workspace model (config/, linker/)
+  - IDL parsing and graph (adapters/idl/, graph/)
+  - MCP server with multi-repo tools (mcp/)
+  - cross-repo import resolution

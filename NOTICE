@@ -9,6 +9,13 @@ Components copied or adapted from ast-outline:
     (split from aeroxy src/core.rs)
   - src/adapters/* (except idl/)
 
+Local patches on top of adopted code:
+  - src/adapters/kotlin.rs: added _name_or_child_identifier helper
+    because tree-sitter-kotlin uses child nodes (type_identifier /
+    simple_identifier) rather than named fields for declaration names.
+    Upstream's field_text(node, "name") returns None for every kotlin
+    declaration, leaving names as "?". Patch isolated; rest verbatim.
+
 The following components are original to repolayer:
   - cross-repo workspace model (config/, linker/)
   - IDL parsing and graph (adapters/idl/, graph/)

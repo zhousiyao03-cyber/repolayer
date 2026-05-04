@@ -6,6 +6,7 @@ pub mod build;
 pub mod compat;
 pub mod init;
 pub mod install;
+pub mod prompt;
 pub mod query;
 pub mod serve;
 pub mod update;
@@ -119,6 +120,8 @@ pub enum Command {
         #[arg(long)]
         mcp: String,
     },
+    /// Print agent system-prompt snippet (pipe to CLAUDE.md / AGENTS.md)
+    Prompt,
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -142,5 +145,6 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Search { query, k, json } => compat::search::run(query, k, json).await,
         Command::FindRelated { spec, k, json } => compat::find_related::run(spec, k, json).await,
         Command::Install { mcp } => install::run(&mcp).await,
+        Command::Prompt => prompt::run().await,
     }
 }

@@ -6,6 +6,7 @@
 //! they are dispatched separately by the indexer.
 
 pub mod base;
+pub mod python;
 // Adapters land here in tasks 3-11:
 // pub mod rust;
 // pub mod csharp;
@@ -13,7 +14,6 @@ pub mod base;
 // pub mod kotlin;
 // pub mod scala;
 // pub mod typescript;
-// pub mod python;
 // pub mod go;
 // pub mod markdown;
 

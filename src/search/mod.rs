@@ -12,3 +12,4 @@ pub mod tokens;
 pub mod format;
 pub mod ranking;
 pub mod fusion;
+pub mod store;

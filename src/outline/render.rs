@@ -1,2 +1,897 @@
-// Implementation lands in Plan B Task B-3.
-// This stub exists only so cargo build doesn't fail.
+//! Outline / show / digest / find_symbols / find_implementations renderers.
+//! Adopted from aeroxy/ast-outline `src/core.rs` (renderer section,
+//! lines 392-1268).
+
+use colored::Colorize;
+use serde::{Serialize, Serializer};
+use std::path::Path;
+
+use crate::core::declaration::{
+    Declaration, DeclarationKind, DigestOptions, OutlineOptions, ParseResult,
+};
+use crate::core::schema::{
+    JSON_SCHEMA_IMPLEMENTS, JSON_SCHEMA_OUTLINE, JSON_SCHEMA_SHOW,
+};
+
+/// One-line legend printed above every `digest` output. Tells the
+/// reader (usually an agent) how to decode the compact symbol forms.
+const DIGEST_LEGEND: &str =
+    "# legend: name() = callable · [N×] = N overloads · [m] = modifier · [deprecated] = deprecated\n";
+
+fn _size_label(line_count: usize) -> &'static str {
+    match line_count {
+        0..=50 => "tiny",
+        51..=200 => "small",
+        201..=600 => "medium",
+        601..=1500 => "large",
+        _ => "xlarge",
+    }
+}
+
+
+pub fn render_outline(result: &ParseResult, opts: &OutlineOptions) -> String {
+    let mut lines = vec![_format_file_header(
+        &format!("# {}", result.path.display()),
+        result,
+    )];
+    if let Some(warn) = _format_error_warning(result) {
+        lines.push(warn);
+    }
+    for decl in &result.declarations {
+        _render_decl(decl, opts, 0, &mut lines);
+    }
+    lines.join("\n")
+}
+fn _format_file_header(prefix: &str, result: &ParseResult) -> String {
+    let counts = _collect_counts(&result.declarations);
+    // Lead with size bucket + raw counts. Char count is intentionally
+    // raw rather than a token estimate — tokenizers vary, and a single
+    // chars/4 number printed authoritatively would mislead. Agents that
+    // care can divide by their tokenizer's empirical ratio.
+    let mut parts = vec![
+        format!("[{}]", _size_label(result.line_count)),
+        format!("{} lines", result.line_count),
+        format!("{} chars", result.source.len()),
+    ];
+
+    if result.language == "markdown" {
+        let order = [("headings", "headings"), ("code_blocks", "code blocks")];
+        for (key, label) in order {
+            let n = counts.get(key).copied().unwrap_or(0);
+            if n > 0 {
+                parts.push(format!("{} {}", n, label));
+            }
+        }
+    } else {
+        let order = [
+            ("types", "types"),
+            ("methods", "methods"),
+            ("fields", "fields"),
+        ];
+        for (key, label) in order {
+            let n = counts.get(key).copied().unwrap_or(0);
+            if n > 0 {
+                parts.push(format!("{} {}", n, label));
+            }
+        }
+    }
+    format!("{} ({})", prefix.blue().bold(), parts.join(", ").dimmed())
+}
+
+fn _format_error_warning(result: &ParseResult) -> Option<String> {
+    if result.error_count == 0 {
+        return None;
+    }
+    let plural = if result.error_count != 1 { "s" } else { "" };
+    Some(
+        format!(
+            "# WARNING: {} parse error{} — output may be incomplete",
+            result.error_count, plural
+        )
+        .red()
+        .to_string(),
+    )
+}
+
+fn _collect_counts(decls: &[Declaration]) -> std::collections::HashMap<&'static str, usize> {
+    use DeclarationKind::*;
+    let mut out = std::collections::HashMap::new();
+    out.insert("types", 0);
+    out.insert("methods", 0);
+    out.insert("fields", 0);
+    out.insert("headings", 0);
+    out.insert("code_blocks", 0);
+
+    let mut stack: Vec<&Declaration> = decls.iter().collect();
+    while let Some(d) = stack.pop() {
+        let k = &d.kind;
+        match k {
+            Class | Struct | Interface | Record | Enum => *out.get_mut("types").unwrap() += 1,
+            Method | Function | Constructor | Destructor | Operator => {
+                *out.get_mut("methods").unwrap() += 1
+            }
+            Field | Property | Event | Indexer => *out.get_mut("fields").unwrap() += 1,
+            Heading => *out.get_mut("headings").unwrap() += 1,
+            CodeBlock => *out.get_mut("code_blocks").unwrap() += 1,
+            _ => {}
+        }
+        for child in &d.children {
+            stack.push(child);
+        }
+    }
+    out
+}
+
+fn _render_decl(decl: &Declaration, opts: &OutlineOptions, indent: usize, out: &mut Vec<String>) {
+    use DeclarationKind::*;
+
+    let is_field = matches!(decl.kind, Field | Property | Event | Indexer);
+    if is_field && !opts.include_fields {
+        return;
+    }
+    if decl.visibility == "private" && !opts.include_private {
+        return;
+    }
+
+    let prefix = "    ".repeat(indent);
+
+    if opts.include_docs && !decl.docs.is_empty() && !decl.docs_inside {
+        for d in _clip_docs(&decl.docs, opts.max_doc_lines) {
+            out.push(format!("{}{}", prefix, d));
+        }
+    }
+
+    let attrs_prefix = if opts.include_attributes && !decl.attrs.is_empty() {
+        format!("{} ", decl.attrs.join(" "))
+    } else {
+        String::new()
+    };
+
+    let suffix = if opts.include_line_numbers {
+        decl.lines_suffix()
+    } else {
+        String::new()
+    };
+
+    if decl.kind == Namespace {
+        out.push(format!(
+            "{}namespace {}",
+            prefix,
+            decl.name.magenta().bold()
+        ));
+    } else {
+        out.push(format!(
+            "{}{}{}{}",
+            prefix, attrs_prefix, decl.signature, suffix
+        ));
+    }
+
+    if opts.include_docs && !decl.docs.is_empty() && decl.docs_inside {
+        let inner_prefix = "    ".repeat(indent + 1);
+        for d in _clip_docs(&decl.docs, opts.max_doc_lines) {
+            out.push(format!("{}{}", inner_prefix, d));
+        }
+    }
+
+    for child in &decl.children {
+        _render_decl(child, opts, indent + 1, out);
+    }
+
+    if indent == 0
+        || matches!(
+            decl.kind,
+            Class | Struct | Interface | Record | Enum | Namespace
+        )
+    {
+        out.push(String::new());
+    }
+}
+
+fn _clip_docs(docs: &[String], limit: usize) -> Vec<String> {
+    if docs.len() <= limit {
+        docs.to_vec()
+    } else {
+        let mut clipped = docs[..limit].to_vec();
+        clipped.push("...".to_string());
+        clipped
+    }
+}
+
+pub fn render_digest(
+    results: &[ParseResult],
+    opts: &DigestOptions,
+    root: Option<&std::path::Path>,
+) -> String {
+    if results.is_empty() {
+        return "# no files\n".to_string();
+    }
+
+    let default_root = results[0].path.parent().unwrap_or(std::path::Path::new(""));
+    let root = root.unwrap_or(default_root);
+
+    let mut grouped: std::collections::BTreeMap<&std::path::Path, Vec<&ParseResult>> =
+        std::collections::BTreeMap::new();
+    for r in results {
+        let parent = r.path.parent().unwrap_or(std::path::Path::new(""));
+        grouped.entry(parent).or_default().push(r);
+    }
+
+    // Top-of-output legend so an agent reading the digest cold knows
+    // what the compact tokens mean.
+    let mut lines = vec![DIGEST_LEGEND.dimmed().to_string()];
+    for (dir, res) in grouped {
+        let rel = dir.strip_prefix(root).unwrap_or(dir);
+        lines.push(format!("{}/", rel.display().to_string().cyan().bold()));
+        for r in res {
+            lines.extend(_digest_one(r, opts));
+        }
+        lines.push(String::new());
+    }
+
+    let mut out = lines.join("\n");
+    out = out.trim_end().to_string();
+    out.push('\n');
+    out
+}
+
+fn _digest_one(result: &ParseResult, opts: &DigestOptions) -> Vec<String> {
+    let name = result
+        .path
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let mut lines = vec![_format_file_header(&format!("  {}", name), result)];
+    if let Some(warn) = _format_error_warning(result) {
+        lines.push(format!("  {}", warn));
+    }
+
+    if result.language == "markdown" {
+        let toc = _digest_markdown(&result.declarations, opts, 4, 1);
+        if toc.is_empty() {
+            if let Some(last) = lines.last_mut() {
+                last.push_str("  # empty");
+            }
+            return lines;
+        }
+        lines.extend(toc);
+        return lines;
+    }
+
+    let types = _flatten_types(&result.declarations, "");
+    let free_functions = _flatten_free_functions(&result.declarations, opts);
+
+    if types.is_empty() && free_functions.is_empty() {
+        if let Some(last) = lines.last_mut() {
+            last.push_str("  # no declarations");
+        }
+        return lines;
+    }
+
+    for t in types {
+        let mut header = String::from("    ");
+        // Inline attrs (e.g. `#[derive(Debug)]`, `@dataclass`) before the
+        // kind keyword. The adapter populated `attrs` already; we just
+        // surface a short joined form (skip overly long attr lists).
+        let attrs_inline = _format_inline_attrs(&t.attrs);
+        if !attrs_inline.is_empty() {
+            header.push_str(&attrs_inline);
+            header.push(' ');
+        }
+        // Prefer `native_kind` (`trait`, `case class`, `data class`, …)
+        // when the adapter set it; fall back to the canonical kind.
+        let kind_str = t
+            .native_kind
+            .as_deref()
+            .unwrap_or(t.kind.as_str());
+        // Modifiers (abstract / sealed / final / partial / …) — but skip
+        // ones the native_kind already names, so we don't render
+        // "sealed sealed class" for `sealed class Foo`.
+        for m in &t.modifiers {
+            if !kind_str.split_whitespace().any(|w| w == m) {
+                header.push_str(&format!("{} ", m.dimmed()));
+            }
+        }
+        header.push_str(&kind_str.italic().to_string());
+        header.push(' ');
+        header.push_str(&t.name.green().bold().to_string());
+        if !t.bases.is_empty() {
+            header.push_str(" : ");
+            header.push_str(&t.bases.join(", "));
+        }
+        if t.deprecated {
+            header.push_str(&format!(" {}", "[deprecated]".red()));
+        }
+        header.push_str(&t.lines_suffix());
+        lines.push(header);
+
+        let members = _digest_members(&t, opts);
+        if !members.is_empty() {
+            let collapsed = _collapse_overloads(members.iter().map(|d| (*d).clone()).collect());
+            let shown = &collapsed[..std::cmp::min(collapsed.len(), opts.max_members_per_type)];
+            let tokens: Vec<String> = shown.iter().map(_format_member_token).collect();
+            lines.extend(_wrap_tokens(&tokens, 100, "      "));
+            if collapsed.len() > shown.len() {
+                lines.push(
+                    format!("      ... +{} more", collapsed.len() - shown.len())
+                        .dimmed()
+                        .to_string(),
+                );
+            }
+        }
+    }
+
+    if !free_functions.is_empty() {
+        let collapsed = _collapse_overloads(free_functions.iter().map(|d| (*d).clone()).collect());
+        let shown =
+            &collapsed[..std::cmp::min(collapsed.len(), opts.max_members_per_type)];
+        let tokens: Vec<String> = shown.iter().map(_format_member_token).collect();
+        lines.extend(_wrap_tokens(&tokens, 100, "    "));
+    }
+
+    lines
+}
+
+/// Render a single member as a compact token for the digest list.
+fn _format_member_token(m: &Declaration) -> String {
+    let mut s = String::new();
+    for mod_ in &m.modifiers {
+        s.push_str(&format!("[{}] ", mod_.dimmed()));
+    }
+    let is_callable = matches!(
+        m.kind,
+        DeclarationKind::Method
+            | DeclarationKind::Function
+            | DeclarationKind::Constructor
+            | DeclarationKind::Destructor
+            | DeclarationKind::Operator
+    );
+    if is_callable {
+        // Display name might already carry an overload-count suffix
+        // ("foo [3×]") that `_collapse_overloads` attached — keep it
+        // outside the parens.
+        if let Some((base, suffix)) = m.name.rsplit_once(' ') {
+            if suffix.starts_with('[') {
+                s.push_str(&format!("{}() {}", base.yellow(), suffix.dimmed()));
+            } else {
+                s.push_str(&format!("{}()", m.name.yellow()));
+            }
+        } else {
+            s.push_str(&format!("{}()", m.name.yellow()));
+        }
+    } else {
+        s.push_str(&format!(
+            "{} [{}]",
+            m.name.yellow(),
+            m.kind.as_str().dimmed()
+        ));
+    }
+    if m.deprecated {
+        s.push_str(&format!(" {}", "[deprecated]".red()));
+    }
+    s
+}
+
+/// Collapse adjacent same-name callables into one token with a `[N×]`
+/// suffix. Saves a noisy line on overload-heavy languages (Java/C# in
+/// particular). Operates on owned `Declaration`s so the renderer can
+/// rewrite the `name`.
+fn _collapse_overloads(members: Vec<Declaration>) -> Vec<Declaration> {
+    let mut out: Vec<Declaration> = Vec::with_capacity(members.len());
+    for m in members {
+        let is_callable = matches!(
+            m.kind,
+            DeclarationKind::Method
+                | DeclarationKind::Function
+                | DeclarationKind::Constructor
+                | DeclarationKind::Destructor
+                | DeclarationKind::Operator
+        );
+        if is_callable {
+            if let Some(prev) = out.last_mut() {
+                if prev.kind == m.kind {
+                    let prev_base = prev
+                        .name
+                        .rsplit_once(' ')
+                        .filter(|(_, s)| s.starts_with('['))
+                        .map(|(b, _)| b)
+                        .unwrap_or(prev.name.as_str());
+                    if prev_base == m.name {
+                        let count = prev
+                            .name
+                            .rsplit_once(' ')
+                            .and_then(|(_, s)| {
+                                s.strip_prefix('[')
+                                    .and_then(|s| s.strip_suffix("×]"))
+                                    .and_then(|s| s.parse::<usize>().ok())
+                            })
+                            .unwrap_or(1)
+                            + 1;
+                        prev.name = format!("{} [{}×]", prev_base, count);
+                        continue;
+                    }
+                }
+            }
+        }
+        out.push(m);
+    }
+    out
+}
+
+/// Pick a small subset of attrs worth showing inline before the kind
+/// keyword. We surface short attrs (under 40 chars combined) to avoid
+/// noise. Long ones (full `#[derive(Debug, Clone, PartialEq, Eq, …)]`)
+/// stay in the outline-only attrs prefix.
+fn _format_inline_attrs(attrs: &[String]) -> String {
+    if attrs.is_empty() {
+        return String::new();
+    }
+    let joined = attrs.join(" ");
+    if joined.len() > 40 {
+        // Fall back to a short marker so the reader knows attrs exist
+        // without flooding the line.
+        return format!("[{}attr{}]", attrs.len(), if attrs.len() == 1 { "" } else { "s" })
+            .dimmed()
+            .to_string();
+    }
+    joined.dimmed().to_string()
+}
+
+fn _flatten_types(decls: &[Declaration], prefix: &str) -> Vec<Declaration> {
+    use DeclarationKind::*;
+    let mut out = Vec::new();
+    for d in decls {
+        if d.kind == Namespace {
+            let new_prefix = if prefix.is_empty() {
+                format!("{}.", d.name)
+            } else {
+                format!("{}{}.", prefix, d.name)
+            };
+            out.extend(_flatten_types(&d.children, &new_prefix));
+        } else if matches!(d.kind, Class | Struct | Interface | Record | Enum) {
+            let mut qualified = d.clone();
+            if !prefix.is_empty() {
+                qualified.name = format!("{}{}", prefix, d.name);
+            }
+            let new_prefix = format!("{}.", qualified.name);
+            out.push(qualified);
+            out.extend(_flatten_types(&d.children, &new_prefix));
+        }
+    }
+    out
+}
+
+fn _flatten_free_functions<'a>(
+    decls: &'a [Declaration],
+    opts: &DigestOptions,
+) -> Vec<&'a Declaration> {
+    use DeclarationKind::*;
+    let mut out = Vec::new();
+    for d in decls {
+        if d.kind == Namespace {
+            out.extend(_flatten_free_functions(&d.children, opts));
+        } else if matches!(d.kind, Class | Struct | Interface | Record | Enum) {
+            continue;
+        } else {
+            if d.kind == Field && !opts.include_fields {
+                continue;
+            }
+            if d.visibility == "private" && !opts.include_private {
+                continue;
+            }
+            out.push(d);
+        }
+    }
+    out
+}
+
+fn _digest_members<'a>(type_decl: &'a Declaration, opts: &DigestOptions) -> Vec<&'a Declaration> {
+    use DeclarationKind::*;
+    let mut members = Vec::new();
+    for c in &type_decl.children {
+        if matches!(
+            c.kind,
+            Class | Struct | Interface | Record | Enum | Namespace | EnumMember
+        ) {
+            continue;
+        }
+        if c.kind == Field && !opts.include_fields {
+            continue;
+        }
+        if c.visibility == "private" && !opts.include_private {
+            continue;
+        }
+        members.push(c);
+    }
+    members
+}
+
+fn _wrap_tokens(tokens: &[String], width: usize, indent: &str) -> Vec<String> {
+    if tokens.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut cur = indent.to_string();
+    for tok in tokens {
+        let piece = if cur == indent {
+            tok.clone()
+        } else {
+            format!("  {}", tok)
+        };
+        if cur.len() + piece.len() > width && cur != indent {
+            out.push(cur);
+            cur = format!("{}{}", indent, tok);
+        } else {
+            cur.push_str(&piece);
+        }
+    }
+    if cur != indent {
+        out.push(cur);
+    }
+    out
+}
+
+#[derive(Debug, Serialize)]
+pub struct SymbolMatch {
+    pub qualified_name: String,
+    pub kind: String,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub source: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ancestor_signatures: Vec<String>,
+}
+
+pub fn find_symbols(result: &ParseResult, symbol: &str) -> Vec<SymbolMatch> {
+    let parts: Vec<&str> = symbol.split('.').collect();
+    let mut matches = Vec::new();
+    _search_walk(
+        &result.declarations,
+        &result.source,
+        Vec::new(),
+        Vec::new(),
+        &parts,
+        &mut matches,
+    );
+    matches
+}
+
+fn _search_walk(
+    decls: &[Declaration],
+    src: &[u8],
+    trail: Vec<String>,
+    ancestors: Vec<&Declaration>,
+    parts: &[&str],
+    out: &mut Vec<SymbolMatch>,
+) {
+    for d in decls {
+        let mut new_trail = trail.clone();
+        if !d.name.is_empty() {
+            new_trail.push(d.name.clone());
+        }
+
+        // For markdown headings, fall back to case-insensitive substring
+        // per dotted part so `show README.md install` matches `## Installation`.
+        // Code symbols stay on exact suffix-equality — substring there would
+        // collide too easily (`new` matching `is_new`, `renew`, …).
+        let heading_relax = matches!(d.kind, DeclarationKind::Heading);
+        if !d.name.is_empty() && _trail_matches(&new_trail, parts, heading_relax) {
+            let start = if d.doc_start_byte > 0 {
+                std::cmp::max(d.doc_start_byte, d.start_byte)
+            } else {
+                d.start_byte
+            };
+            let end = d.end_byte;
+            let source = String::from_utf8_lossy(&src[start..end]).to_string();
+
+            out.push(SymbolMatch {
+                qualified_name: new_trail.join("."),
+                kind: d.kind.to_string(),
+                start_line: d.start_line,
+                end_line: d.end_line,
+                source,
+                ancestor_signatures: ancestors.iter().map(|a| a.signature.clone()).collect(),
+            });
+        }
+
+        if !d.children.is_empty() {
+            let mut new_ancestors = ancestors.clone();
+            new_ancestors.push(d);
+            _search_walk(&d.children, src, new_trail, new_ancestors, parts, out);
+        }
+    }
+}
+
+fn _trail_matches(trail: &[String], parts: &[&str], substring: bool) -> bool {
+    if parts.len() > trail.len() {
+        return false;
+    }
+    let start = trail.len() - parts.len();
+    for (i, p) in parts.iter().enumerate() {
+        let segment = &trail[start + i];
+        let hit = if substring {
+            segment.to_lowercase().contains(&p.to_lowercase())
+        } else {
+            segment == p
+        };
+        if !hit {
+            return false;
+        }
+    }
+    true
+}
+
+#[derive(Clone, Serialize)]
+pub struct ImplMatch {
+    pub path: String,
+    pub start_line: usize,
+    pub kind: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub via: Vec<String>,
+}
+
+pub fn find_implementations(
+    results: &[ParseResult],
+    type_name: &str,
+    transitive: bool,
+) -> Vec<ImplMatch> {
+    let target = _normalize_type_name(type_name);
+    let mut all_types: Vec<(&std::path::Path, &Declaration)> = Vec::new();
+    for r in results {
+        _collect_candidate_types(&r.declarations, &r.path, &mut all_types);
+    }
+
+    let mut direct = Vec::new();
+    for (path, d) in &all_types {
+        for b in &d.bases {
+            if _normalize_type_name(b) == target {
+                direct.push(_impl_match(path, d, Vec::new()));
+                break;
+            }
+        }
+    }
+
+    if !transitive {
+        return direct;
+    }
+
+    let mut out = direct.clone();
+    let mut seen: std::collections::HashSet<(String, usize)> = std::collections::HashSet::new();
+    for m in &direct {
+        seen.insert((m.path.clone(), m.start_line));
+    }
+
+    let mut frontier = direct;
+    while !frontier.is_empty() {
+        let mut next_frontier = Vec::new();
+        for parent in frontier {
+            let parent_name = _normalize_type_name(&parent.name);
+            for (path, d) in &all_types {
+                let key = (path.to_string_lossy().to_string(), d.start_line);
+                if seen.contains(&key) {
+                    continue;
+                }
+                for b in &d.bases {
+                    if _normalize_type_name(b) == parent_name {
+                        let mut chain = parent.via.clone();
+                        chain.push(parent.name.clone());
+                        let m = _impl_match(path, d, chain);
+                        seen.insert(key.clone());
+                        out.push(_impl_match(path, d, m.via.clone()));
+                        next_frontier.push(m);
+                        break;
+                    }
+                }
+            }
+        }
+        frontier = next_frontier;
+    }
+    out
+}
+
+fn _collect_candidate_types<'a>(
+    decls: &'a [Declaration],
+    path: &'a std::path::Path,
+    out: &mut Vec<(&'a std::path::Path, &'a Declaration)>,
+) {
+    use DeclarationKind::*;
+    for d in decls {
+        if matches!(d.kind, Class | Struct | Interface | Record) {
+            out.push((path, d));
+        }
+        if !d.children.is_empty() {
+            _collect_candidate_types(&d.children, path, out);
+        }
+    }
+}
+
+fn _impl_match(path: &std::path::Path, d: &Declaration, via: Vec<String>) -> ImplMatch {
+    ImplMatch {
+        path: path.to_string_lossy().to_string(),
+        start_line: d.start_line,
+        kind: d.kind.to_string(),
+        name: d.name.clone(),
+        via,
+    }
+}
+
+fn _normalize_type_name(name: &str) -> String {
+    let mut name = name.trim();
+    if let Some(i) = name.find('<') {
+        name = &name[..i];
+    }
+    if let Some(i) = name.find('[') {
+        name = &name[..i];
+    }
+    if let Some(i) = name.rfind('.') {
+        name = &name[i + 1..];
+    }
+    if let Some(i) = name.rfind("::") {
+        name = &name[i + 2..];
+    }
+    name.to_string()
+}
+
+fn _digest_markdown(
+    decls: &[Declaration],
+    opts: &DigestOptions,
+    indent: usize,
+    depth: usize,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if depth > opts.max_heading_depth {
+        return out;
+    }
+    let pad = " ".repeat(indent);
+    for d in decls {
+        if matches!(d.kind, DeclarationKind::Heading) {
+            out.push(format!("{}{}{}", pad, d.signature, d.lines_suffix()));
+            out.extend(_digest_markdown(&d.children, opts, indent + 2, depth + 1));
+        } else if matches!(d.kind, DeclarationKind::CodeBlock) && opts.include_fields {
+            out.push(format!("{}{}{}", pad, d.signature, d.lines_suffix()));
+        }
+    }
+    out
+}
+
+fn _serialize_path<S: Serializer>(p: &Path, ser: S) -> Result<S::Ok, S::Error> {
+    ser.serialize_str(&p.to_string_lossy())
+}
+
+// ---------------------------------------------------------------------------
+// JSON rendering
+//
+// JSON is another view over the same Declaration graph that powers the
+// terminal formatters.  The schema is versioned via the JSON_SCHEMA_*
+// constants; bump those on breaking changes.
+// ---------------------------------------------------------------------------
+
+/// Respect OutlineOptions when serialising the declaration tree.
+fn _filter_decls(decls: &[Declaration], opts: &OutlineOptions) -> Vec<Declaration> {
+    use DeclarationKind::*;
+    if decls.is_empty() {
+        return Vec::new();
+    }
+    decls
+        .iter()
+        .filter_map(|d| {
+            let is_field = matches!(d.kind, Field | Property | Event | Indexer);
+            if is_field && !opts.include_fields {
+                return None;
+            }
+            if d.visibility == "private" && !opts.include_private {
+                return None;
+            }
+            if matches!(d.kind, Heading | CodeBlock) && !opts.include_docs {
+                return None;
+            }
+            let mut clone = d.clone();
+            let mut children = _filter_decls(&d.children, opts);
+            if let Some(cap) = opts.max_members {
+                children.truncate(cap);
+            }
+            clone.children = children;
+            Some(clone)
+        })
+        .collect()
+}
+
+#[derive(Serialize)]
+struct JsonOutlineDoc<'a> {
+    schema: &'static str,
+    files: Vec<JsonFile<'a>>,
+}
+
+#[derive(Serialize)]
+struct JsonFile<'a> {
+    path: &'a str,
+    language: &'static str,
+    line_count: usize,
+    error_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    warning: Option<&'static str>,
+    declarations: Vec<Declaration>,
+}
+
+#[derive(Serialize)]
+struct JsonShowDoc<'a> {
+    schema: &'static str,
+    path: String,
+    language: &'static str,
+    matches: Vec<&'a SymbolMatch>,
+}
+
+#[derive(Serialize)]
+struct JsonImplementsDoc<'a> {
+    schema: &'static str,
+    target: &'a str,
+    transitive: bool,
+    matches: &'a [ImplMatch],
+}
+
+/// Render `outline` (or `outline --json`) — one entry per file.
+pub fn render_json_outline(results: &[ParseResult], opts: &OutlineOptions, pretty: bool) -> String {
+    let mut paths: Vec<String> = results
+        .iter()
+        .map(|r| r.path.to_string_lossy().into_owned())
+        .collect();
+
+    let files: Vec<JsonFile> = results
+        .iter()
+        .zip(paths.iter_mut())
+        .map(|(r, path)| JsonFile {
+            path,
+            language: r.language,
+            line_count: r.line_count,
+            error_count: r.error_count,
+            warning: if r.error_count > 0 {
+                Some("output may be incomplete")
+            } else {
+                None
+            },
+            declarations: _filter_decls(&r.declarations, opts),
+        })
+        .collect();
+
+    let doc = JsonOutlineDoc {
+        schema: JSON_SCHEMA_OUTLINE,
+        files,
+    };
+    _to_json(&doc, pretty)
+}
+
+/// Render `show --json`.
+pub fn render_json_show(result: &ParseResult, matches: &[SymbolMatch], pretty: bool) -> String {
+    let doc = JsonShowDoc {
+        schema: JSON_SCHEMA_SHOW,
+        path: result.path.to_string_lossy().into_owned(),
+        language: result.language,
+        matches: matches.iter().collect(),
+    };
+    _to_json(&doc, pretty)
+}
+
+/// Render `implements --json`.
+pub fn render_json_implements(
+    target: &str,
+    matches: &[ImplMatch],
+    transitive: bool,
+    pretty: bool,
+) -> String {
+    let doc = JsonImplementsDoc {
+        schema: JSON_SCHEMA_IMPLEMENTS,
+        target,
+        transitive,
+        matches,
+    };
+    _to_json(&doc, pretty)
+}
+
+fn _to_json<T: Serialize>(value: &T, pretty: bool) -> String {
+    if pretty {
+        serde_json::to_string_pretty(value)
+    } else {
+        serde_json::to_string(value)
+    }
+    .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+}

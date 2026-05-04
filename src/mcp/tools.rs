@@ -38,6 +38,26 @@ fn default_depth() -> usize {
     2
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindIdlImplArgs {
+    /// IDL method name, optionally qualified as "ServiceName.MethodName".
+    pub method: String,
+    /// Optional service name to narrow results when multiple services define
+    /// the same method name.
+    #[serde(default)]
+    pub service: Option<String>,
+    /// Whether to include client-side Invokes edges (default: true).
+    #[serde(default = "default_true")]
+    pub include_invokes: bool,
+    /// Whether to include server-side Implements edges (default: true).
+    #[serde(default = "default_true")]
+    pub include_implements: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// Tool dispatch wrapper.
 ///
 /// The store is wrapped in `Arc<Mutex<Store>>` because `rusqlite::Connection`
@@ -79,6 +99,18 @@ impl Tools {
     pub fn list_repos(&self) -> Result<Value> {
         let store = self.store.lock().expect("store mutex poisoned");
         let r = query::list_repos::list_repos(&store)?;
+        Ok(serde_json::to_value(r)?)
+    }
+
+    pub fn find_idl_impl(&self, args: FindIdlImplArgs) -> Result<Value> {
+        let store = self.store.lock().expect("store mutex poisoned");
+        let q_args = query::find_idl_impl::FindIdlImplArgs {
+            method: args.method,
+            service: args.service,
+            include_invokes: args.include_invokes,
+            include_implements: args.include_implements,
+        };
+        let r = query::find_idl_impl::find_idl_impl(&store, &q_args)?;
         Ok(serde_json::to_value(r)?)
     }
 }

@@ -244,6 +244,44 @@ impl Store {
         Ok(())
     }
 
+    /// Find IdlMethod nodes whose symbol contains `name`.
+    /// If `service` is given, further restrict to symbols that start with `service`.
+    pub fn find_idl_methods_by_name(
+        &self,
+        name: &str,
+        service: Option<&str>,
+    ) -> Result<Vec<Node>> {
+        let escaped = name
+            .replace('\\', "\\\\")
+            .replace('%', "\\%")
+            .replace('_', "\\_");
+        let pattern = format!("%{}%", escaped);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
+             FROM nodes
+             WHERE kind = 'idlmethod' AND symbol LIKE ?1 ESCAPE '\\'",
+        )?;
+        let rows = stmt
+            .query_map(rusqlite::params![pattern], row_to_node)?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // If service filter given, narrow to symbols that start with the service prefix
+        if let Some(svc) = service {
+            let prefix = format!("{}.", svc);
+            Ok(rows
+                .into_iter()
+                .filter(|n| {
+                    n.symbol
+                        .as_deref()
+                        .map(|s| s.starts_with(&prefix) || s.starts_with(svc))
+                        .unwrap_or(false)
+                })
+                .collect())
+        } else {
+            Ok(rows)
+        }
+    }
+
     pub fn search_symbols_substring(&self, q: &str, limit: usize) -> Result<Vec<Node>> {
         let escaped = q
             .replace('\\', "\\\\")

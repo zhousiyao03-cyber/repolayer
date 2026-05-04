@@ -9,7 +9,7 @@ use rmcp::{
     ServiceExt,
 };
 use std::sync::{Arc, Mutex};
-use tools::{FindContextArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
+use tools::{FindContextArgs, FindIdlImplArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
 
 /// MCP server exposing repolayer's 5 query tools via stdio transport.
 ///
@@ -79,6 +79,16 @@ impl RepolayerServer {
     #[rmcp::tool(description = "List all indexed repos with their metadata.")]
     fn list_repos(&self) -> Result<CallToolResult, rmcp::ErrorData> {
         into_result(self.tools.list_repos())
+    }
+
+    #[rmcp::tool(
+        description = "Find code modules that implement (server-side) or invoke (client-side) a given IDL method across all indexed repos. Returns locations sorted by confidence."
+    )]
+    fn find_idl_impl(
+        &self,
+        Parameters(args): Parameters<FindIdlImplArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.find_idl_impl(args))
     }
 }
 

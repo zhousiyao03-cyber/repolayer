@@ -49,6 +49,7 @@ tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
 safetensors = "0.6"
 memmap2 = "0.9"
 wide = "0.7"
+xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"

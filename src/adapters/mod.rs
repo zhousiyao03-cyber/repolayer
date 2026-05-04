@@ -8,13 +8,13 @@
 pub mod base;
 pub mod python;
 pub mod typescript;
+pub mod go;
 // Adapters land here in tasks 3-11:
 // pub mod rust;
 // pub mod csharp;
 // pub mod java;
 // pub mod kotlin;
 // pub mod scala;
-// pub mod go;
 // pub mod markdown;
 
 // IDL adapters move from src/parser/idl/ in Task 13:

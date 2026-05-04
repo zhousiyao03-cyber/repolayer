@@ -1,7 +1,9 @@
 use anyhow::Result;
 use clap::Subcommand;
+use std::path::PathBuf;
 
 pub mod build;
+pub mod compat;
 pub mod init;
 pub mod query;
 pub mod serve;
@@ -25,6 +27,14 @@ pub enum Command {
         #[arg(long)]
         http: Option<String>,
     },
+    /// Print structural outline of source files (signatures, line ranges, no method bodies)
+    Outline {
+        /// Files or directories to outline
+        paths: Vec<PathBuf>,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -35,5 +45,6 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Query { text } => query::run(text).await,
         Command::Callers { .. } => anyhow::bail!("not implemented yet"),
         Command::Serve { http } => serve::run(http).await,
+        Command::Outline { paths, json } => compat::outline::run(paths, json).await,
     }
 }

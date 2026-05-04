@@ -1,4 +1,5 @@
 pub mod tools;
+pub mod tools_compat;
 
 use crate::graph::store::Store;
 use anyhow::Result;
@@ -10,6 +11,7 @@ use rmcp::{
 };
 use std::sync::{Arc, Mutex};
 use tools::{FindContextArgs, FindIdlImplArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
+use tools_compat::OutlineArgs;
 
 /// MCP server exposing repolayer's 5 query tools via stdio transport.
 ///
@@ -89,6 +91,16 @@ impl RepolayerServer {
         Parameters(args): Parameters<FindIdlImplArgs>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         into_result(self.tools.find_idl_impl(args))
+    }
+
+    #[rmcp::tool(
+        description = "Print structural outline of source files (signatures, line ranges, no method bodies). Pass file or directory paths; directories are walked recursively, honouring .gitignore. Set json=true for a machine-readable schema-versioned response."
+    )]
+    fn outline(
+        &self,
+        Parameters(args): Parameters<OutlineArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.outline(args))
     }
 }
 

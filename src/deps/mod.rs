@@ -12,3 +12,4 @@ pub use extract::{extract, RawImport};
 pub use graph::{DepEdge, DepGraph, ImportKind};
 pub use manifest::{detect_aliases, ProjectAliases, PythonPackage, RustPackage};
 pub use options::DepError;
+pub use resolver::{build_suffix_index, resolve, ResolveCtx};

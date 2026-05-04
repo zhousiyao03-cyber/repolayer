@@ -1,5 +1,6 @@
 pub mod core;
 pub mod adapters;
+pub mod file_filter;
 pub mod outline;
 pub mod surface;
 pub mod deps;

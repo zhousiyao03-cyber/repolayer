@@ -3,7 +3,7 @@
 //! Tasks B-12 to B-20.
 
 pub mod cache;
-pub mod chunker; // temp stub; full impl in B-13
+pub mod chunker;
 pub mod index; // temp stub; full impl in B-20
 pub mod tokens;
 pub mod format;

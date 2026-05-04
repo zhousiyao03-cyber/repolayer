@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+use crate::search::chunker::Chunk;
 use serde::{Deserialize, Serialize};
 
 /// Search hit result.
@@ -12,18 +13,6 @@ use serde::{Deserialize, Serialize};
 pub struct SearchHit {
     pub chunk: Chunk,
     pub score: f32,
-}
-
-/// A chunk of source code.
-#[derive(Debug, Clone)]
-pub struct Chunk {
-    pub content: String,
-    pub file_path: String,
-    pub start_line: u32,
-    pub end_line: u32,
-    pub start_byte: u32,
-    pub end_byte: u32,
-    pub language: String,
 }
 
 /// Model metadata for the search index.

@@ -61,6 +61,34 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Show forward dependencies of a file (what does X import)
+    Deps {
+        /// File or directory to query
+        path: PathBuf,
+        /// Maximum BFS depth
+        #[arg(long, default_value_t = 1)]
+        depth: usize,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show reverse dependencies of a file (who imports X)
+    #[command(name = "reverse-deps")]
+    ReverseDeps {
+        /// File to query
+        path: PathBuf,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find import cycles via Tarjan SCC (exits with code 1 if any cycle found)
+    Cycles {
+        /// Workspace root (defaults to current directory)
+        path: Option<PathBuf>,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -78,5 +106,8 @@ pub async fn run(cmd: Command) -> Result<()> {
             let p = path.unwrap_or_else(|| PathBuf::from("."));
             compat::surface::run(p, json).await
         }
+        Command::Deps { path, depth, json } => compat::deps::run(path, depth, json).await,
+        Command::ReverseDeps { path, json } => compat::reverse_deps::run(path, json).await,
+        Command::Cycles { path, json } => compat::cycles::run(path, json).await,
     }
 }

@@ -11,7 +11,7 @@ use rmcp::{
 };
 use std::sync::{Arc, Mutex};
 use tools::{FindContextArgs, FindIdlImplArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
-use tools_compat::{DigestArgs, OutlineArgs, ShowArgs, SurfaceArgs};
+use tools_compat::{CyclesArgs, DepsArgs, DigestArgs, OutlineArgs, ReverseDepsArgs, ShowArgs, SurfaceArgs};
 
 /// MCP server exposing repolayer's 5 query tools via stdio transport.
 ///
@@ -131,6 +131,36 @@ impl RepolayerServer {
         Parameters(args): Parameters<SurfaceArgs>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         into_result(self.tools.surface(args))
+    }
+
+    #[rmcp::tool(
+        description = "Forward import dependencies of a file (what does X import). Transitive lookup via depth parameter. Set json=true for a machine-readable schema-versioned response."
+    )]
+    fn deps(
+        &self,
+        Parameters(args): Parameters<DepsArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.deps(args))
+    }
+
+    #[rmcp::tool(
+        description = "Reverse import dependencies — who imports the given file (refactor blast radius). Set json=true for a machine-readable schema-versioned response."
+    )]
+    fn reverse_deps(
+        &self,
+        Parameters(args): Parameters<ReverseDepsArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.reverse_deps(args))
+    }
+
+    #[rmcp::tool(
+        description = "Find import cycles in the workspace via Tarjan SCC. Returns all cycle groups with 2+ members. Set json=true for a machine-readable schema-versioned response."
+    )]
+    fn cycles(
+        &self,
+        Parameters(args): Parameters<CyclesArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.cycles(args))
     }
 }
 

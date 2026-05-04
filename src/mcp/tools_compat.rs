@@ -221,6 +221,42 @@ impl Tools {
     }
 }
 
+// ── dep-graph args ────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct DepsArgs {
+    /// Absolute or relative path to the file (or directory) to query.
+    pub path: String,
+    /// Maximum BFS hop depth (default 1 = direct imports only).
+    #[serde(default = "default_depth")]
+    pub depth: usize,
+    /// If true, return machine-readable JSON (schema `ast-outline.deps.v1`).
+    #[serde(default)]
+    pub json: bool,
+}
+fn default_depth() -> usize {
+    1
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReverseDepsArgs {
+    /// Absolute or relative path to the file to look up callers for.
+    pub path: String,
+    /// If true, return machine-readable JSON (schema `ast-outline.reverse-deps.v1`).
+    #[serde(default)]
+    pub json: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct CyclesArgs {
+    /// Workspace root to scan (absolute or relative). Defaults to `.`.
+    #[serde(default)]
+    pub path: Option<String>,
+    /// If true, return machine-readable JSON (schema `ast-outline.cycles.v1`).
+    #[serde(default)]
+    pub json: bool,
+}
+
 impl Tools {
     /// Resolve the published public API surface of a package.
     ///
@@ -262,5 +298,159 @@ impl Tools {
                 "text": text,
             }))
         }
+    }
+}
+
+impl Tools {
+    /// Forward import dependencies of a file (what does X import), up to `depth` hops.
+    pub fn deps(&self, args: DepsArgs) -> anyhow::Result<Value> {
+        use crate::cli::compat::deps::find_workspace_root;
+        use crate::cli::compat::load_or_build_dep_graph;
+        use crate::core::schema::JSON_SCHEMA_DEPS;
+        use std::path::Path;
+
+        let path = Path::new(&args.path);
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+        let workspace = if canonical.is_file() {
+            canonical.parent().unwrap_or(&canonical).to_path_buf()
+        } else {
+            canonical.clone()
+        };
+        let workspace_root = find_workspace_root(&workspace).unwrap_or(workspace);
+
+        let g = load_or_build_dep_graph(&workspace_root)?;
+
+        let queries: Vec<std::path::PathBuf> = if canonical.is_file() {
+            vec![canonical.clone()]
+        } else {
+            g.forward
+                .keys()
+                .filter(|p| p.starts_with(&canonical))
+                .cloned()
+                .collect()
+        };
+
+        let depth = args.depth.max(1);
+        let mut all_edges: Vec<serde_json::Value> = Vec::new();
+        for q in &queries {
+            let mut visited = std::collections::HashSet::new();
+            let mut frontier = vec![q.clone()];
+            visited.insert(q.clone());
+            for _ in 0..depth {
+                let mut next = Vec::new();
+                for p in &frontier {
+                    if let Some(edges) = g.forward.get(p) {
+                        for e in edges {
+                            let line_suf = if e.line > 0 {
+                                format!(" L{}", e.line)
+                            } else {
+                                String::new()
+                            };
+                            all_edges.push(serde_json::json!({
+                                "from": p.display().to_string(),
+                                "to": e.target.display().to_string(),
+                                "kind": e.kind.label(),
+                                "line": e.line,
+                                "line_label": line_suf,
+                            }));
+                            if visited.insert(e.target.clone()) {
+                                next.push(e.target.clone());
+                            }
+                        }
+                    }
+                }
+                frontier = next;
+                if frontier.is_empty() {
+                    break;
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "schema_version": JSON_SCHEMA_DEPS,
+            "edges": all_edges,
+        }))
+    }
+}
+
+impl Tools {
+    /// Reverse import dependencies — who imports the given file (refactor blast radius).
+    pub fn reverse_deps(&self, args: ReverseDepsArgs) -> anyhow::Result<Value> {
+        use crate::cli::compat::deps::find_workspace_root;
+        use crate::cli::compat::load_or_build_dep_graph;
+        use crate::core::schema::JSON_SCHEMA_REVERSE_DEPS;
+        use std::path::Path;
+
+        let path = Path::new(&args.path);
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+
+        let workspace = if canonical.is_file() {
+            canonical.parent().unwrap_or(&canonical).to_path_buf()
+        } else {
+            canonical.clone()
+        };
+        let workspace_root = find_workspace_root(&workspace).unwrap_or(workspace);
+
+        let g = load_or_build_dep_graph(&workspace_root)?;
+
+        let mut callers: Vec<serde_json::Value> = Vec::new();
+        let mut from_paths: Vec<std::path::PathBuf> = g
+            .forward
+            .iter()
+            .filter(|(_, edges)| edges.iter().any(|e| e.target == canonical))
+            .map(|(from, _)| from.clone())
+            .collect();
+        from_paths.sort();
+
+        for from in &from_paths {
+            if let Some(edges) = g.forward.get(from) {
+                for e in edges {
+                    if e.target == canonical {
+                        callers.push(serde_json::json!({
+                            "from": from.display().to_string(),
+                            "kind": e.kind.label(),
+                            "line": e.line,
+                        }));
+                    }
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "schema_version": JSON_SCHEMA_REVERSE_DEPS,
+            "target": canonical.display().to_string(),
+            "callers": callers,
+        }))
+    }
+}
+
+impl Tools {
+    /// Find import cycles via Tarjan SCC. Returns all cycle groups (>= 2 members).
+    pub fn cycles(&self, args: CyclesArgs) -> anyhow::Result<Value> {
+        use crate::cli::compat::deps::find_workspace_root;
+        use crate::cli::compat::load_or_build_dep_graph;
+        use crate::core::schema::JSON_SCHEMA_CYCLES;
+        use std::path::Path;
+
+        let path_str = args.path.unwrap_or_else(|| ".".to_string());
+        let workspace = Path::new(&path_str).to_path_buf();
+        let workspace = workspace
+            .canonicalize()
+            .unwrap_or_else(|_| workspace.clone());
+        let workspace_root = find_workspace_root(&workspace).unwrap_or(workspace);
+
+        let g = load_or_build_dep_graph(&workspace_root)?;
+
+        let cycles = crate::deps::scc::detect(&g, 2);
+        let entries: Vec<Vec<String>> = cycles
+            .into_iter()
+            .map(|c| c.members.iter().map(|p| p.display().to_string()).collect())
+            .collect();
+
+        Ok(serde_json::json!({
+            "schema_version": JSON_SCHEMA_CYCLES,
+            "cycles": entries,
+        }))
     }
 }

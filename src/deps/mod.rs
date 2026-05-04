@@ -4,7 +4,9 @@
 
 pub mod extract;
 pub mod graph;
+pub mod options;
 pub mod resolver;
 
 pub use extract::{extract, RawImport};
-pub use graph::ImportKind;
+pub use graph::{DepEdge, DepGraph, ImportKind};
+pub use options::DepError;

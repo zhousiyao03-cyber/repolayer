@@ -145,7 +145,7 @@ impl Indexer {
     }
 
     fn index_idl_repo(&mut self, repo: &str, root: &Path, stats: &mut BuildStats) -> Result<()> {
-        use crate::parser::idl::{protobuf::ProtobufParser, thrift::ThriftParser};
+        use crate::adapters::idl::{protobuf::ProtobufParser, thrift::ThriftParser};
         let proto_p = ProtobufParser::new();
         let thrift_p = ThriftParser::new();
 

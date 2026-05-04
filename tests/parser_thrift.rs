@@ -1,4 +1,4 @@
-use repolayer::parser::idl::thrift::ThriftParser;
+use repolayer::adapters::idl::thrift::ThriftParser;
 use std::path::PathBuf;
 
 #[test]

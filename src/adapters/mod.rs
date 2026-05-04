@@ -15,12 +15,4 @@ pub mod java;
 pub mod kotlin;
 pub mod scala;
 pub mod markdown;
-// Adapters land here in tasks 3-11:
-// pub mod rust;
-// pub mod csharp;
-// pub mod java;
-// pub mod kotlin;
-// pub mod markdown;
-
-// IDL adapters move from src/parser/idl/ in Task 13:
-// pub mod idl;
+pub mod idl;

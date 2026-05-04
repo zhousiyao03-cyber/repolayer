@@ -1,4 +1,4 @@
-use crate::parser::idl::protobuf::{IdlFile, IdlMethod, IdlService};
+use crate::adapters::idl::protobuf::{IdlFile, IdlMethod, IdlService};
 use anyhow::{Context, Result};
 use std::path::Path;
 

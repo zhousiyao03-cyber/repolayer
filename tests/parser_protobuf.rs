@@ -1,4 +1,4 @@
-use repolayer::parser::idl::protobuf::ProtobufParser;
+use repolayer::adapters::idl::protobuf::ProtobufParser;
 use std::path::PathBuf;
 
 #[test]

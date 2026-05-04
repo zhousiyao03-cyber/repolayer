@@ -357,15 +357,16 @@ impl Indexer {
     }
 
     pub fn reindex_file(&mut self, repo: &str, abs_path: &Path) -> Result<()> {
-        use crate::parser::Parser as _;
-
-        // Find the repo's root from config
+        // Find the repo's root from config — match by resolved name, not just last component,
+        // so that repos with explicit `name:` fields are found correctly.
         let repo_cfg = self.config.repos.iter().find(|r| {
             let root = self.resolve_repo_path(&r.path);
-            root.file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default()
-                == repo
+            let resolved_name = r.name.clone().unwrap_or_else(|| {
+                root.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default()
+            });
+            resolved_name == repo
         });
         let Some(rcfg) = repo_cfg.cloned() else {
             return Ok(());
@@ -376,58 +377,53 @@ impl Indexer {
         };
         let rel = rel_path_str(rel_path);
 
-        // Delete existing nodes for this module
+        // ── Delete from all 4 stores ─────────────────────────────────────────
         self.store.delete_module(repo, &rel)?;
+        self.outline_store.delete(repo, &rel)?;
+        self.deps_store.delete_file(repo, &rel)?;
+        self.search_store.delete_file(repo, &rel)?;
 
-        // If file no longer exists (deleted), we're done after delete
+        // If file no longer exists (deleted), cleanup is done
         if !abs_path.exists() {
             return Ok(());
         }
 
-        let ext = abs_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-        let ts_parser = crate::parser::typescript::TypeScriptParser::new();
-        let py_parser = crate::parser::python::PythonParser::new();
-        let go_parser = crate::parser::go::GoParser::new();
-
-        let parsed = match ext {
-            "ts" | "tsx" | "js" | "jsx" | "mjs" => match ts_parser.parse_file(abs_path) {
-                Ok(p) => p,
-                Err(_) => return Ok(()),
-            },
-            "py" => match py_parser.parse_file(abs_path) {
-                Ok(p) => p,
-                Err(_) => return Ok(()),
-            },
-            "go" => match go_parser.parse_file(abs_path) {
-                Ok(p) => p,
-                Err(_) => return Ok(()),
-            },
-            _ => return Ok(()),
+        // ── Re-parse via adapters (richer Declaration tree) ──────────────────
+        let parse_result = match crate::adapters::parse_file(abs_path) {
+            Some(pr) => pr,
+            None => return Ok(()), // unsupported extension
         };
 
+        // ── Re-write index.db ────────────────────────────────────────────────
         let repo_node = Node::new(NodeKind::Repo, repo, "", None);
         self.store.upsert_node(&repo_node)?;
         let module_node = Node::new(NodeKind::Module, repo, &rel, None);
         self.store.upsert_node(&module_node)?;
         self.store.upsert_edge(&Edge {
-            from: repo_node.id,
+            from: repo_node.id.clone(),
             to: module_node.id.clone(),
             kind: EdgeKind::Contains,
             confidence: 1.0,
         })?;
-        for sym in &parsed.symbols {
-            let mut sn = Node::new(NodeKind::Function, repo, &rel, Some(&sym.name));
-            sn.loc_start = Some(sym.loc_start);
-            sn.loc_end = Some(sym.loc_end);
-            self.store.upsert_node(&sn)?;
-            self.store.upsert_edge(&Edge {
-                from: module_node.id.clone(),
-                to: sn.id,
-                kind: EdgeKind::Contains,
-                confidence: 1.0,
-            })?;
+        // Emit Type/Method/Function nodes from the Declaration tree (same as build_all)
+        let mut dummy_stats = BuildStats::default();
+        for decl in &parse_result.declarations {
+            emit_decl_nodes(
+                &self.store,
+                &repo_node.id,
+                &module_node.id,
+                repo,
+                &rel,
+                decl,
+                None,
+                &mut dummy_stats,
+            )?;
         }
-        // TODO(B-24): also invalidate outline.db / deps.db / search.db per file
+
+        // ── Re-write outline.db ──────────────────────────────────────────────
+        let content_hash = hash_source(&parse_result.source);
+        self.outline_store.upsert(repo, &parse_result, &content_hash)?;
+
         Ok(())
     }
 

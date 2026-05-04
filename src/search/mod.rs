@@ -6,6 +6,7 @@ pub mod bm25;
 pub mod cache;
 pub mod chunker;
 pub mod download;
+pub mod embed;
 pub mod index; // temp stub; full impl in B-20
 pub mod tokens;
 pub mod format;

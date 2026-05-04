@@ -109,6 +109,54 @@ repos:
     );
 }
 
+/// Unit test for the ast-grep call-pattern helper.
+///
+/// Verifies that a method name appearing only inside a string literal does NOT
+/// produce a match, while an actual call expression DOES.
+#[test]
+fn ast_grep_filters_false_positive_in_string_literal() {
+    use ast_grep_language::SupportLang;
+    use repolayer::linker::idl_links::has_call_to_method;
+
+    // TypeScript: method name only in a string — should NOT match.
+    let ts_literal_only = r#"const msg = "GetUser fetched successfully";"#;
+    assert!(
+        !has_call_to_method(ts_literal_only, SupportLang::TypeScript, "GetUser"),
+        "string literal should not trigger a call match"
+    );
+
+    // TypeScript: actual method call — SHOULD match.
+    let ts_call = r#"const result = client.GetUser(userId);"#;
+    assert!(
+        has_call_to_method(ts_call, SupportLang::TypeScript, "GetUser"),
+        "member call expression should match"
+    );
+
+    // TypeScript: bare function call — SHOULD match.
+    let ts_bare_call = r#"GetUser(userId);"#;
+    assert!(
+        has_call_to_method(ts_bare_call, SupportLang::TypeScript, "GetUser"),
+        "bare function call should match"
+    );
+
+    // Go: actual call expression — SHOULD match.
+    let go_call = r#"package main
+func main() { GetBenefit(42) }"#;
+    assert!(
+        has_call_to_method(go_call, SupportLang::Go, "GetBenefit"),
+        "Go call expression should match"
+    );
+
+    // Go: name only in a comment — should NOT match (no call expression node).
+    let go_comment = r#"package main
+// GetBenefit is called elsewhere
+func main() {}"#;
+    assert!(
+        !has_call_to_method(go_comment, SupportLang::Go, "GetBenefit"),
+        "Go comment should not trigger a call match"
+    );
+}
+
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {

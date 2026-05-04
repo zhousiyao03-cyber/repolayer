@@ -64,16 +64,50 @@ impl Serialize for DeclarationKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Default)]
+impl<'de> serde::Deserialize<'de> for DeclarationKind {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(de)?;
+        let v = match s.as_str() {
+            "namespace" => Self::Namespace,
+            "class" => Self::Class,
+            "struct" => Self::Struct,
+            "interface" => Self::Interface,
+            "record" => Self::Record,
+            "enum" => Self::Enum,
+            "enum_member" => Self::EnumMember,
+            "method" => Self::Method,
+            "function" => Self::Function,
+            "ctor" => Self::Constructor,
+            "dtor" => Self::Destructor,
+            "property" => Self::Property,
+            "indexer" => Self::Indexer,
+            "field" => Self::Field,
+            "event" => Self::Event,
+            "delegate" => Self::Delegate,
+            "operator" => Self::Operator,
+            "heading" => Self::Heading,
+            "code_block" => Self::CodeBlock,
+            other => {
+                return Err(serde::de::Error::custom(format!(
+                    "unknown DeclarationKind: {}",
+                    other
+                )))
+            }
+        };
+        Ok(v)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize, Default)]
 pub struct Declaration {
     pub kind: DeclarationKind,
     pub name: String,
     pub signature: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bases: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attrs: Vec<String>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub docs: Vec<String>,
     pub docs_inside: bool,
     pub visibility: String,
@@ -88,7 +122,7 @@ pub struct Declaration {
     pub modifiers: Vec<String>,
     #[serde(default, skip_serializing_if = "_is_false")]
     pub deprecated: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Declaration>,
 }
 

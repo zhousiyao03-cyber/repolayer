@@ -35,6 +35,16 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print source body of one or more symbols from a file
+    Show {
+        /// Source file to extract from
+        file: PathBuf,
+        /// Symbol names (suffix-matching; pass multiple to fetch several)
+        symbols: Vec<String>,
+        /// Emit JSON instead of source code
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -46,5 +56,6 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Callers { .. } => anyhow::bail!("not implemented yet"),
         Command::Serve { http } => serve::run(http).await,
         Command::Outline { paths, json } => compat::outline::run(paths, json).await,
+        Command::Show { file, symbols, json } => compat::show::run(file, symbols, json).await,
     }
 }

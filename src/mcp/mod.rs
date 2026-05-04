@@ -11,7 +11,7 @@ use rmcp::{
 };
 use std::sync::{Arc, Mutex};
 use tools::{FindContextArgs, FindIdlImplArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
-use tools_compat::OutlineArgs;
+use tools_compat::{OutlineArgs, ShowArgs};
 
 /// MCP server exposing repolayer's 5 query tools via stdio transport.
 ///
@@ -101,6 +101,16 @@ impl RepolayerServer {
         Parameters(args): Parameters<OutlineArgs>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         into_result(self.tools.outline(args))
+    }
+
+    #[rmcp::tool(
+        description = "Print source body of one or more symbols from a file. Suffix-matching: 'TakeDamage' or 'Player.TakeDamage' both work. Set json=true for a schema-versioned JSON response."
+    )]
+    fn show(
+        &self,
+        Parameters(args): Parameters<ShowArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.show(args))
     }
 }
 

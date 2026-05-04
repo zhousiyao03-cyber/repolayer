@@ -3,4 +3,5 @@
 //! find-related) so repolayer is a drop-in superset.
 
 pub mod outline;
-// ... additional compat subcommands added per task (C-5 through C-12)
+pub mod show;
+// ... additional compat subcommands added per task (C-6 through C-12)

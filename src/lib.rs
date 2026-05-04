@@ -1,5 +1,8 @@
 pub mod core;
 pub mod adapters;
+pub mod outline;
+pub mod deps;
+pub mod search;
 pub mod cli;
 pub mod config;
 pub mod graph;

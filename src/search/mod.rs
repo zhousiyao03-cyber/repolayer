@@ -10,3 +10,5 @@ pub mod embed;
 pub mod index; // temp stub; full impl in B-20
 pub mod tokens;
 pub mod format;
+pub mod ranking;
+pub mod fusion;

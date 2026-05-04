@@ -16,7 +16,7 @@ fn open_creates_schema() {
 fn insert_and_get_node_roundtrips() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
-    let node = Node::new(NodeKind::Symbol, "repo_a", "src/auth.ts", Some("login"));
+    let node = Node::new(NodeKind::Function, "repo_a", "src/auth.ts", Some("login"));
     store.upsert_node(&node).unwrap();
     let fetched = store.get_node(&node.id).unwrap().unwrap();
     assert_eq!(fetched.symbol.as_deref(), Some("login"));
@@ -37,14 +37,15 @@ fn upsert_is_idempotent() {
 fn insert_edge_and_query() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
-    let a = Node::new(NodeKind::Symbol, "r", "a.ts", Some("foo"));
-    let b = Node::new(NodeKind::Symbol, "r", "b.ts", Some("bar"));
+    let a = Node::new(NodeKind::Function, "r", "a.ts", Some("foo"));
+    let b = Node::new(NodeKind::Function, "r", "b.ts", Some("bar"));
     store.upsert_node(&a).unwrap();
     store.upsert_node(&b).unwrap();
     let e = Edge {
         from: a.id.clone(),
         to: b.id.clone(),
         kind: EdgeKind::Calls,
+        confidence: 1.0,
     };
     store.upsert_edge(&e).unwrap();
     let outgoing = store.outgoing_edges(&a.id, EdgeKind::Calls).unwrap();

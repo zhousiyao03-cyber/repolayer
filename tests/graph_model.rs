@@ -3,13 +3,13 @@ use repolayer::graph::model::*;
 #[test]
 fn node_id_is_stable_across_runs() {
     let a = Node::new(
-        NodeKind::Symbol,
+        NodeKind::Function,
         "promotion_member",
         "src/auth.ts",
         Some("login"),
     );
     let b = Node::new(
-        NodeKind::Symbol,
+        NodeKind::Function,
         "promotion_member",
         "src/auth.ts",
         Some("login"),
@@ -20,13 +20,13 @@ fn node_id_is_stable_across_runs() {
 #[test]
 fn different_symbols_get_different_ids() {
     let a = Node::new(
-        NodeKind::Symbol,
+        NodeKind::Function,
         "promotion_member",
         "src/auth.ts",
         Some("login"),
     );
     let b = Node::new(
-        NodeKind::Symbol,
+        NodeKind::Function,
         "promotion_member",
         "src/auth.ts",
         Some("logout"),
@@ -40,6 +40,7 @@ fn edge_serializes_with_kind() {
         from: "n1".into(),
         to: "n2".into(),
         kind: EdgeKind::Calls,
+        confidence: 1.0,
     };
     let json = serde_json::to_string(&e).unwrap();
     assert!(json.contains(r#""kind":"calls""#));
@@ -47,7 +48,7 @@ fn edge_serializes_with_kind() {
 
 #[test]
 fn different_kinds_get_different_ids() {
-    let a = Node::new(NodeKind::Symbol, "r", "src/x.ts", Some("foo"));
+    let a = Node::new(NodeKind::Function, "r", "src/x.ts", Some("foo"));
     let b = Node::new(NodeKind::Module, "r", "src/x.ts", Some("foo"));
     assert_ne!(a.id, b.id, "kind should be part of the id hash");
 }

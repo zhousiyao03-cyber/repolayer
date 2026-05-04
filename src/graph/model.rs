@@ -6,7 +6,9 @@ use sha2::{Digest, Sha256};
 pub enum NodeKind {
     Repo,
     Module,
-    Symbol,
+    Type,        // class/struct/interface/trait/enum/record
+    Method,      // method/ctor/dtor/operator inside a Type
+    Function,    // top-level function
     IdlService,
     IdlMethod,
 }
@@ -20,6 +22,7 @@ pub enum EdgeKind {
     Implements,
     Invokes,
     Defines,
+    Extends,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,11 +35,15 @@ pub struct Node {
     #[serde(default)]
     pub summary: Option<String>,
     #[serde(default)]
-    pub owner: Option<String>,
+    pub visibility: Option<String>,
+    #[serde(default)]
+    pub native_kind: Option<String>,
     #[serde(default)]
     pub loc_start: Option<u32>,
     #[serde(default)]
     pub loc_end: Option<u32>,
+    #[serde(default)]
+    pub deprecated: bool,
 }
 
 impl Node {
@@ -49,9 +56,11 @@ impl Node {
             path: path.into(),
             symbol: symbol.map(String::from),
             summary: None,
-            owner: None,
+            visibility: None,
+            native_kind: None,
             loc_start: None,
             loc_end: None,
+            deprecated: false,
         }
     }
 }
@@ -63,7 +72,9 @@ impl NodeKind {
         match self {
             NodeKind::Repo => "repo",
             NodeKind::Module => "module",
-            NodeKind::Symbol => "symbol",
+            NodeKind::Type => "type",
+            NodeKind::Method => "method",
+            NodeKind::Function => "function",
             NodeKind::IdlService => "idlservice",
             NodeKind::IdlMethod => "idlmethod",
         }
@@ -90,4 +101,10 @@ pub struct Edge {
     pub from: String,
     pub to: String,
     pub kind: EdgeKind,
+    #[serde(default = "default_confidence")]
+    pub confidence: f32,
+}
+
+fn default_confidence() -> f32 {
+    1.0
 }

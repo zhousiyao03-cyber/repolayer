@@ -29,9 +29,11 @@ fn build_creates_db_with_nodes_and_edges() {
 
     let conn = rusqlite::Connection::open(&db).unwrap();
     let n: i64 = conn
-        .query_row("SELECT COUNT(*) FROM nodes WHERE kind='symbol'", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT COUNT(*) FROM nodes WHERE kind IN ('type','method','function')",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert!(n >= 3, "expected ≥3 symbol nodes, got {}", n);
     let m: i64 = conn

@@ -55,6 +55,7 @@ impl<'a> IdlLinker<'a> {
                             from: module_node.id.clone(),
                             to: m_node_id.clone(),
                             kind: edge_kind,
+                            confidence: 1.0,
                         }) {
                             Ok(()) => count += 1,
                             Err(e) => warn!("idl_link upsert failed: {}", e),

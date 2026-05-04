@@ -14,7 +14,7 @@ fn find_context_returns_relevant_symbols() {
         ("repo_b", "src/redeem.ts", "redeemBenefit"),
     ];
     for (r, p, s) in &nodes {
-        let n = Node::new(NodeKind::Symbol, r, p, Some(s));
+        let n = Node::new(NodeKind::Function, r, p, Some(s));
         store.upsert_node(&n).unwrap();
     }
 
@@ -38,7 +38,7 @@ fn find_context_respects_token_budget() {
     for i in 0..100 {
         let name = format!("test_func_{}", i);
         let n = Node::new(
-            NodeKind::Symbol,
+            NodeKind::Function,
             "r",
             &format!("src/f{}.ts", i),
             Some(&name),
@@ -77,7 +77,7 @@ fn find_context_dedups_by_node_id() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
     // Single node that contains both query tokens
-    let n = Node::new(NodeKind::Symbol, "r", "src/auth.ts", Some("login_user"));
+    let n = Node::new(NodeKind::Function, "r", "src/auth.ts", Some("login_user"));
     store.upsert_node(&n).unwrap();
     let result = find_context(&store, "login user", 5000).unwrap();
     assert_eq!(

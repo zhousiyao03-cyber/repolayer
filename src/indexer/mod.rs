@@ -191,6 +191,7 @@ impl Indexer {
                     from: repo_node.id.clone(),
                     to: svc_node.id.clone(),
                     kind: EdgeKind::Defines,
+                    confidence: 1.0,
                 })?;
                 stats.nodes += 1;
                 stats.edges += 1;
@@ -203,6 +204,7 @@ impl Indexer {
                         from: svc_node.id.clone(),
                         to: m_node.id.clone(),
                         kind: EdgeKind::Contains,
+                        confidence: 1.0,
                     })?;
                     stats.nodes += 1;
                     stats.edges += 1;
@@ -269,9 +271,10 @@ impl Indexer {
             from: repo_node.id,
             to: module_node.id.clone(),
             kind: EdgeKind::Contains,
+            confidence: 1.0,
         })?;
         for sym in &parsed.symbols {
-            let mut sn = Node::new(NodeKind::Symbol, repo, &rel, Some(&sym.name));
+            let mut sn = Node::new(NodeKind::Function, repo, &rel, Some(&sym.name));
             sn.loc_start = Some(sym.loc_start);
             sn.loc_end = Some(sym.loc_end);
             self.store.upsert_node(&sn)?;
@@ -279,6 +282,7 @@ impl Indexer {
                 from: module_node.id.clone(),
                 to: sn.id,
                 kind: EdgeKind::Contains,
+                confidence: 1.0,
             })?;
         }
         Ok(())
@@ -336,12 +340,13 @@ impl Indexer {
                 from: repo_node.id.clone(),
                 to: module_node.id.clone(),
                 kind: EdgeKind::Contains,
+                confidence: 1.0,
             })?;
             stats.nodes += 1;
             stats.edges += 1;
 
             for sym in &parsed.symbols {
-                let mut sn = Node::new(NodeKind::Symbol, repo, &rel, Some(&sym.name));
+                let mut sn = Node::new(NodeKind::Function, repo, &rel, Some(&sym.name));
                 sn.loc_start = Some(sym.loc_start);
                 sn.loc_end = Some(sym.loc_end);
                 self.store.upsert_node(&sn)?;
@@ -349,6 +354,7 @@ impl Indexer {
                     from: module_node.id.clone(),
                     to: sn.id.clone(),
                     kind: EdgeKind::Contains,
+                    confidence: 1.0,
                 })?;
                 stats.nodes += 1;
                 stats.edges += 1;
@@ -368,11 +374,13 @@ impl Indexer {
                         from: repo_node.id.clone(),
                         to: target_module.id.clone(),
                         kind: EdgeKind::Contains,
+                        confidence: 1.0,
                     })?;
                     self.store.upsert_edge(&Edge {
                         from: module_node.id.clone(),
                         to: target_module.id,
                         kind: EdgeKind::Imports,
+                        confidence: 1.0,
                     })?;
                     stats.edges += 1;
                 } else if let Some(pkg) = pkg_index.lookup(imp) {
@@ -392,6 +400,7 @@ impl Indexer {
                             from: target_repo_node.id,
                             to: target_module.id.clone(),
                             kind: EdgeKind::Contains,
+                            confidence: 1.0,
                         })?;
                         // Don't bump stats.edges — this synthesized Contains is a side effect of
                         // the Imports edge we're creating, not a primary traversal edge.
@@ -400,6 +409,7 @@ impl Indexer {
                         from: module_node.id.clone(),
                         to: target_module.id,
                         kind: EdgeKind::Imports,
+                        confidence: 1.0,
                     })?;
                     stats.edges += 1;
                 }

@@ -8,8 +8,8 @@ fn get_symbol_returns_definition_and_callers() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
 
-    let a = Node::new(NodeKind::Symbol, "r", "a.ts", Some("foo"));
-    let b = Node::new(NodeKind::Symbol, "r", "b.ts", Some("bar"));
+    let a = Node::new(NodeKind::Function, "r", "a.ts", Some("foo"));
+    let b = Node::new(NodeKind::Function, "r", "b.ts", Some("bar"));
     store.upsert_node(&a).unwrap();
     store.upsert_node(&b).unwrap();
     store
@@ -17,6 +17,7 @@ fn get_symbol_returns_definition_and_callers() {
             from: b.id.clone(),
             to: a.id.clone(),
             kind: EdgeKind::Calls,
+            confidence: 1.0,
         })
         .unwrap();
 
@@ -39,9 +40,9 @@ fn get_callers_walks_depth_2() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
     // build chain: c → b → a
-    let a = Node::new(NodeKind::Symbol, "r", "a.ts", Some("a"));
-    let b = Node::new(NodeKind::Symbol, "r", "b.ts", Some("b"));
-    let c = Node::new(NodeKind::Symbol, "r", "c.ts", Some("c"));
+    let a = Node::new(NodeKind::Function, "r", "a.ts", Some("a"));
+    let b = Node::new(NodeKind::Function, "r", "b.ts", Some("b"));
+    let c = Node::new(NodeKind::Function, "r", "c.ts", Some("c"));
     for n in [&a, &b, &c] {
         store.upsert_node(n).unwrap();
     }
@@ -50,6 +51,7 @@ fn get_callers_walks_depth_2() {
             from: b.id.clone(),
             to: a.id.clone(),
             kind: EdgeKind::Calls,
+            confidence: 1.0,
         })
         .unwrap();
     store
@@ -57,6 +59,7 @@ fn get_callers_walks_depth_2() {
             from: c.id.clone(),
             to: b.id.clone(),
             kind: EdgeKind::Calls,
+            confidence: 1.0,
         })
         .unwrap();
 
@@ -70,9 +73,9 @@ fn get_callers_walks_depth_2() {
 fn get_callers_respects_depth() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
-    let a = Node::new(NodeKind::Symbol, "r", "a.ts", Some("a"));
-    let b = Node::new(NodeKind::Symbol, "r", "b.ts", Some("b"));
-    let c = Node::new(NodeKind::Symbol, "r", "c.ts", Some("c"));
+    let a = Node::new(NodeKind::Function, "r", "a.ts", Some("a"));
+    let b = Node::new(NodeKind::Function, "r", "b.ts", Some("b"));
+    let c = Node::new(NodeKind::Function, "r", "c.ts", Some("c"));
     for n in [&a, &b, &c] {
         store.upsert_node(n).unwrap();
     }
@@ -81,6 +84,7 @@ fn get_callers_respects_depth() {
             from: b.id.clone(),
             to: a.id.clone(),
             kind: EdgeKind::Calls,
+            confidence: 1.0,
         })
         .unwrap();
     store
@@ -88,6 +92,7 @@ fn get_callers_respects_depth() {
             from: c.id.clone(),
             to: b.id.clone(),
             kind: EdgeKind::Calls,
+            confidence: 1.0,
         })
         .unwrap();
     let chain = callers::get_callers(&store, "a", 1).unwrap();
@@ -115,6 +120,7 @@ fn get_dependencies_walks_imports() {
             from: a.id.clone(),
             to: b.id.clone(),
             kind: EdgeKind::Imports,
+            confidence: 1.0,
         })
         .unwrap();
     store
@@ -122,6 +128,7 @@ fn get_dependencies_walks_imports() {
             from: b.id.clone(),
             to: c.id.clone(),
             kind: EdgeKind::Imports,
+            confidence: 1.0,
         })
         .unwrap();
 

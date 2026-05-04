@@ -18,6 +18,7 @@ pub fn apply_manual_links(store: &Store, config: &Config) -> Result<u64> {
                 "invokes" => EdgeKind::Invokes,
                 _ => EdgeKind::Imports, // generic "depends on"
             },
+            confidence: 1.0,
         })?;
         count += 1;
     }

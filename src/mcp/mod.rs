@@ -11,7 +11,7 @@ use rmcp::{
 };
 use std::sync::{Arc, Mutex};
 use tools::{FindContextArgs, FindIdlImplArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
-use tools_compat::{DigestArgs, OutlineArgs, ShowArgs};
+use tools_compat::{DigestArgs, OutlineArgs, ShowArgs, SurfaceArgs};
 
 /// MCP server exposing repolayer's 5 query tools via stdio transport.
 ///
@@ -121,6 +121,16 @@ impl RepolayerServer {
         Parameters(args): Parameters<DigestArgs>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         into_result(self.tools.digest(args))
+    }
+
+    #[rmcp::tool(
+        description = "Resolve a package's published public API by following pub use re-exports (Rust), __all__ (Python), barrel files (TypeScript/JavaScript), export clauses (Scala). Auto-detects Cargo.toml / pyproject.toml / package.json / __init__.py. Set json=true for a machine-readable schema-versioned response."
+    )]
+    fn surface(
+        &self,
+        Parameters(args): Parameters<SurfaceArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.surface(args))
     }
 }
 

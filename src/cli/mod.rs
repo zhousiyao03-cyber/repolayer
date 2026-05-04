@@ -53,6 +53,14 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print the published public API of a package (follows pub use / __all__ / barrel files)
+    Surface {
+        /// Path to the package root (auto-detect manifest: Cargo.toml, pyproject.toml, package.json, __init__.py)
+        path: Option<PathBuf>,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -66,5 +74,9 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Outline { paths, json } => compat::outline::run(paths, json).await,
         Command::Show { file, symbols, json } => compat::show::run(file, symbols, json).await,
         Command::Digest { paths, json } => compat::digest::run(paths, json).await,
+        Command::Surface { path, json } => {
+            let p = path.unwrap_or_else(|| PathBuf::from("."));
+            compat::surface::run(p, json).await
+        }
     }
 }

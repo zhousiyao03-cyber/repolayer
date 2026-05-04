@@ -37,6 +37,19 @@ pub struct ShowArgs {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct SurfaceArgs {
+    /// Path to the package root (absolute or relative). Auto-detects manifest:
+    /// Cargo.toml (Rust), pyproject.toml / __init__.py (Python),
+    /// package.json (TypeScript/JavaScript). Defaults to `.` (current directory).
+    #[serde(default)]
+    pub path: Option<String>,
+    /// If true, return machine-readable JSON (schema `ast-outline.surface.v1`)
+    /// instead of the human-readable terminal format.
+    #[serde(default)]
+    pub json: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct DigestArgs {
     /// Files or directories to digest. Each entry may be an absolute or
     /// relative path; directories are walked recursively, honouring
@@ -201,6 +214,50 @@ impl Tools {
             let text = render_digest(&results, &opts, None);
             Ok(serde_json::json!({
                 "schema_version": JSON_SCHEMA_DIGEST,
+                "format": "text",
+                "text": text,
+            }))
+        }
+    }
+}
+
+impl Tools {
+    /// Resolve the published public API surface of a package.
+    ///
+    /// Follows `pub use` re-exports (Rust), `__all__` (Python), barrel files /
+    /// `export` clauses (TypeScript), and `export` clauses (Scala) to return
+    /// the exact set of symbols a downstream consumer can reach.
+    pub fn surface(&self, args: SurfaceArgs) -> anyhow::Result<Value> {
+        use crate::core::schema::JSON_SCHEMA_SURFACE;
+        use crate::surface::options::{OutputMode, SurfaceOptions};
+        use crate::surface::render;
+        use std::path::Path;
+
+        let path_str = args.path.unwrap_or_else(|| ".".to_string());
+        let path = Path::new(&path_str);
+
+        let opts = if args.json {
+            SurfaceOptions {
+                output: OutputMode::Json { compact: false },
+                ..SurfaceOptions::default()
+            }
+        } else {
+            SurfaceOptions::default()
+        };
+
+        let entries = crate::surface::resolve_surface(path, &opts)
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        if args.json {
+            // The JSON renderer already produces the schema-versioned document;
+            // parse it back so the MCP envelope stays consistent.
+            let raw = render::render(&entries, opts.output, opts.include_chain);
+            let parsed: Value = serde_json::from_str(&raw)?;
+            Ok(parsed)
+        } else {
+            let text = render::render(&entries, opts.output, opts.include_chain);
+            Ok(serde_json::json!({
+                "schema_version": JSON_SCHEMA_SURFACE,
                 "format": "text",
                 "text": text,
             }))

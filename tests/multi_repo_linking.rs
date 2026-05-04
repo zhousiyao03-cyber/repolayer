@@ -179,6 +179,86 @@ repos:
     assert!(cross >= 1, "cross-repo Imports edge must still exist");
 }
 
+#[test]
+fn cross_repo_rust_workspace_resolves() {
+    use repolayer::config::{Config, RepoConfig};
+    use repolayer::linker::imports::PackageIndex;
+
+    let workspace = tempdir().unwrap();
+    let crate_a = workspace.path().join("crate_a");
+    let crate_b = workspace.path().join("crate_b");
+    fs::create_dir_all(&crate_a).unwrap();
+    fs::create_dir_all(&crate_b).unwrap();
+    fs::write(
+        crate_a.join("Cargo.toml"),
+        "[package]\nname = \"crate_a\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    fs::write(
+        crate_b.join("Cargo.toml"),
+        "[package]\nname = \"crate_b\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+
+    let cfg = Config {
+        repos: vec![
+            RepoConfig {
+                path: crate_a.clone(),
+                name: None,
+                r#type: None,
+            },
+            RepoConfig {
+                path: crate_b.clone(),
+                name: None,
+                r#type: None,
+            },
+        ],
+        links: vec![],
+        llm: None,
+    };
+
+    let idx = PackageIndex::build(workspace.path(), &cfg).unwrap();
+    assert!(
+        idx.lookup("crate_a").is_some(),
+        "crate_a should be resolvable via Cargo.toml"
+    );
+    assert!(
+        idx.lookup("crate_b").is_some(),
+        "crate_b should be resolvable via Cargo.toml"
+    );
+}
+
+#[test]
+fn cross_repo_python_package_resolves() {
+    use repolayer::config::{Config, RepoConfig};
+    use repolayer::linker::imports::PackageIndex;
+
+    let workspace = tempdir().unwrap();
+    let pkg_a = workspace.path().join("pkg_a");
+    fs::create_dir_all(&pkg_a).unwrap();
+    fs::write(
+        pkg_a.join("pyproject.toml"),
+        "[project]\nname = \"my_python_lib\"\nversion = \"0.1.0\"\n",
+    )
+    .unwrap();
+
+    let cfg = Config {
+        repos: vec![RepoConfig {
+            path: pkg_a.clone(),
+            name: None,
+            r#type: None,
+        }],
+        links: vec![],
+        llm: None,
+    };
+
+    let idx = PackageIndex::build(workspace.path(), &cfg).unwrap();
+    assert!(
+        idx.lookup("my_python_lib").is_some(),
+        "my_python_lib should be resolvable via pyproject.toml"
+    );
+}
+
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {

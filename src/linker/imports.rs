@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::deps::manifest::detect_aliases;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -66,7 +67,23 @@ impl PackageIndex {
                     Err(e) => warn!("skip package.json at {}: {}", pkg_json.display(), e),
                 }
             }
-            // TODO(future): pyproject.toml for Python; go.mod for Go.
+            // Extend with Rust (Cargo.toml) and Python (pyproject.toml) packages.
+            let aliases = detect_aliases(&root);
+            for rust_pkg in &aliases.rust_packages {
+                // Only insert if not already present (package.json takes priority).
+                by_name.entry(rust_pkg.name.clone()).or_insert_with(|| PackageInfo {
+                    repo: repo_name.clone(),
+                    root: rust_pkg.root.clone(),
+                    main_relative: None,
+                });
+            }
+            for py_pkg in &aliases.python_packages {
+                by_name.entry(py_pkg.name.clone()).or_insert_with(|| PackageInfo {
+                    repo: repo_name.clone(),
+                    root: py_pkg.root.clone(),
+                    main_relative: None,
+                });
+            }
         }
         Ok(Self { by_name })
     }

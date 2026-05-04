@@ -12,6 +12,7 @@ pub mod go;
 pub mod rust;
 pub mod csharp;
 pub mod java;
+pub mod kotlin;
 // Adapters land here in tasks 3-11:
 // pub mod rust;
 // pub mod csharp;

@@ -425,6 +425,164 @@ impl Tools {
     }
 }
 
+// ── search + find-related args ───────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct SearchArgs {
+    /// Query string — natural language phrase or symbol name.
+    pub query: String,
+    /// Maximum number of results to return (default 10).
+    #[serde(default = "default_k_10")]
+    pub k: usize,
+    /// If true, return machine-readable JSON (schema `ast-outline.search.v1`).
+    #[serde(default)]
+    pub json: bool,
+}
+fn default_k_10() -> usize {
+    10
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct FindRelatedArgs {
+    /// Target as `"path/to/file.rs:42"` — the line number identifies which chunk to use.
+    pub spec: String,
+    /// Maximum number of results to return (default 5).
+    #[serde(default = "default_k_5")]
+    pub k: usize,
+    /// If true, return machine-readable JSON (schema `ast-outline.find_related.v1`).
+    #[serde(default)]
+    pub json: bool,
+}
+fn default_k_5() -> usize {
+    5
+}
+
+impl Tools {
+    /// Hybrid BM25 + substring search across the workspace search index.
+    pub fn search(&self, args: SearchArgs) -> anyhow::Result<Value> {
+        use crate::core::schema::JSON_SCHEMA_SEARCH;
+
+        let workspace = std::env::current_dir()?;
+        let db = workspace.join(".repolayer").join("search.db");
+        if !db.exists() {
+            anyhow::bail!(
+                "no search index found at {} — run `repolayer build` first",
+                db.display()
+            );
+        }
+
+        let store = crate::search::store::SearchStore::open(&db)?;
+        let hits = store.search_substring(&args.query, args.k)?;
+
+        if args.json {
+            let entries: Vec<Value> = hits
+                .iter()
+                .map(|h| serde_json::to_value(h).unwrap_or_default())
+                .collect();
+            Ok(serde_json::json!({
+                "schema_version": JSON_SCHEMA_SEARCH,
+                "query": args.query,
+                "hits": entries,
+            }))
+        } else {
+            let entries: Vec<Value> = hits
+                .iter()
+                .enumerate()
+                .map(|(i, h)| {
+                    serde_json::json!({
+                        "rank": i + 1,
+                        "path": h.path,
+                        "start_line": h.start_line,
+                        "end_line": h.end_line,
+                        "repo": h.repo,
+                        "score": h.score,
+                    })
+                })
+                .collect();
+            Ok(serde_json::json!({
+                "schema_version": JSON_SCHEMA_SEARCH,
+                "query": args.query,
+                "hits": entries,
+            }))
+        }
+    }
+}
+
+impl Tools {
+    /// Find code chunks similar to a given `file:line` location.
+    pub fn find_related(&self, args: FindRelatedArgs) -> anyhow::Result<Value> {
+        use crate::core::schema::JSON_SCHEMA_FIND_RELATED;
+        use std::path::PathBuf;
+
+        let (file, line): (PathBuf, u32) = match args.spec.rsplit_once(':') {
+            Some((f, l)) => (PathBuf::from(f), l.parse().unwrap_or(0)),
+            None => (PathBuf::from(&args.spec), 0),
+        };
+
+        let workspace = std::env::current_dir()?;
+        let db = workspace.join(".repolayer").join("search.db");
+        if !db.exists() {
+            anyhow::bail!("no search index found — run `repolayer build` first");
+        }
+
+        let store = crate::search::store::SearchStore::open(&db)?;
+
+        let canonical = file.canonicalize().unwrap_or_else(|_| file.clone());
+        let path_str = canonical.to_string_lossy().to_string();
+        let rel_str = file.to_string_lossy().to_string();
+        let suffix = canonical
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| rel_str.clone());
+
+        // Find the source chunk (DB stores repo-relative paths).
+        let (target_content, stored_path): (String, String) = {
+            let conn = store.conn();
+            let line_i = line as i64;
+            let like_pat = format!("%/{}", suffix);
+            let mut stmt = conn.prepare(
+                "SELECT content, path FROM chunks
+                 WHERE (path = ?1 OR path = ?2 OR path LIKE ?3)
+                   AND start_line <= ?4
+                   AND end_line >= ?4
+                 ORDER BY
+                   CASE WHEN path = ?1 OR path = ?2 THEN 0 ELSE 1 END
+                 LIMIT 1",
+            )?;
+            let mut rows = stmt.query(rusqlite::params![path_str, rel_str, like_pat, line_i])?;
+            match rows.next()? {
+                Some(row) => (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+                None => anyhow::bail!(
+                    "no chunk at {}:{} — check path and line number",
+                    canonical.display(),
+                    line
+                ),
+            }
+        };
+
+        let query: String = target_content
+            .split_whitespace()
+            .take(50)
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let mut hits = store.search_substring(&query, args.k + 1)?;
+        hits.retain(|h| h.path != path_str && h.path != rel_str && h.path != stored_path);
+        hits.truncate(args.k);
+
+        let entries: Vec<Value> = hits
+            .iter()
+            .map(|h| serde_json::to_value(h).unwrap_or_default())
+            .collect();
+
+        Ok(serde_json::json!({
+            "schema_version": JSON_SCHEMA_FIND_RELATED,
+            "source": format!("{}:{}", canonical.display(), line),
+            "hits": entries,
+        }))
+    }
+}
+
 impl Tools {
     /// Find import cycles via Tarjan SCC. Returns all cycle groups (>= 2 members).
     pub fn cycles(&self, args: CyclesArgs) -> anyhow::Result<Value> {

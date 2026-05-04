@@ -12,6 +12,9 @@ pub const JSON_SCHEMA_CYCLES: &str = "ast-outline.cycles.v1";
 pub const JSON_SCHEMA_GRAPH: &str = "ast-outline.graph.v1";
 pub const JSON_SCHEMA_DEPS_INDEX: &str = "ast-outline.deps-index.v1";
 
+pub const JSON_SCHEMA_SEARCH: &str = "ast-outline.search.v1";
+pub const JSON_SCHEMA_FIND_RELATED: &str = "ast-outline.find_related.v1";
+
 // repolayer-original (added in later plans):
 pub const JSON_SCHEMA_FIND_CONTEXT: &str = "repolayer.find_context.v1";
 pub const JSON_SCHEMA_GET_SYMBOL: &str = "repolayer.get_symbol.v1";

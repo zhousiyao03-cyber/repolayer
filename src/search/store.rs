@@ -115,4 +115,51 @@ impl SearchStore {
         )?;
         Ok(())
     }
+
+    /// Borrow the underlying connection (read-only access for ad-hoc queries).
+    pub fn conn(&self) -> &Connection {
+        &self.conn
+    }
+
+    /// Case-insensitive substring search across all chunks.
+    ///
+    /// Returns up to `k` hits ordered by SQLite's natural row order. Score is
+    /// always `1.0` (exact substring match). A full BM25+dense path is
+    /// available via [`crate::search::index::Index`]; this is the lightweight
+    /// fallback used by the CLI / MCP when the dense index is not yet warmed up.
+    pub fn search_substring(&self, query: &str, k: usize) -> Result<Vec<SearchHit>> {
+        let q_lower = query.to_lowercase();
+        let pat = format!("%{}%", q_lower);
+        let mut stmt = self.conn.prepare(
+            "SELECT id, repo, path, start_line, end_line, content
+             FROM chunks
+             WHERE LOWER(content) LIKE ?1
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![pat, k as i64], |row| {
+            Ok(SearchHit {
+                id: row.get(0)?,
+                repo: row.get(1)?,
+                path: row.get(2)?,
+                start_line: row.get::<_, i64>(3)? as u32,
+                end_line: row.get::<_, i64>(4)? as u32,
+                content: row.get(5)?,
+                score: 1.0,
+            })
+        })?;
+        let v: std::result::Result<Vec<_>, _> = rows.collect();
+        Ok(v?)
+    }
+}
+
+/// A single search result row from [`SearchStore::search_substring`].
+#[derive(Debug, serde::Serialize)]
+pub struct SearchHit {
+    pub id: i64,
+    pub repo: String,
+    pub path: String,
+    pub start_line: u32,
+    pub end_line: u32,
+    pub content: String,
+    pub score: f32,
 }

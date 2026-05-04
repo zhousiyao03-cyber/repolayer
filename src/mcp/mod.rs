@@ -11,7 +11,7 @@ use rmcp::{
 };
 use std::sync::{Arc, Mutex};
 use tools::{FindContextArgs, FindIdlImplArgs, GetCallersArgs, GetDependenciesArgs, GetSymbolArgs, Tools};
-use tools_compat::{CyclesArgs, DepsArgs, DigestArgs, OutlineArgs, ReverseDepsArgs, ShowArgs, SurfaceArgs};
+use tools_compat::{CyclesArgs, DepsArgs, DigestArgs, FindRelatedArgs, OutlineArgs, ReverseDepsArgs, SearchArgs, ShowArgs, SurfaceArgs};
 
 /// MCP server exposing repolayer's 5 query tools via stdio transport.
 ///
@@ -161,6 +161,26 @@ impl RepolayerServer {
         Parameters(args): Parameters<CyclesArgs>,
     ) -> Result<CallToolResult, rmcp::ErrorData> {
         into_result(self.tools.cycles(args))
+    }
+
+    #[rmcp::tool(
+        description = "Hybrid BM25 + semantic search across the indexed workspace. Requires `repolayer build` to have been run. Set json=true for a schema-versioned response."
+    )]
+    fn search(
+        &self,
+        Parameters(args): Parameters<SearchArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.search(args))
+    }
+
+    #[rmcp::tool(
+        description = "Find code chunks structurally similar to a given file:line location. Pass spec as 'path/to/file.rs:42'. Set json=true for a schema-versioned response."
+    )]
+    fn find_related(
+        &self,
+        Parameters(args): Parameters<FindRelatedArgs>,
+    ) -> Result<CallToolResult, rmcp::ErrorData> {
+        into_result(self.tools.find_related(args))
     }
 }
 

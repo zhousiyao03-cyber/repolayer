@@ -89,6 +89,29 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Hybrid BM25 + semantic search across the indexed workspace
+    Search {
+        /// Query string (natural language or symbol name)
+        query: String,
+        /// Number of results to return
+        #[arg(short, long, default_value_t = 10)]
+        k: usize,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find code chunks structurally similar to a given file:line
+    #[command(name = "find-related")]
+    FindRelated {
+        /// Target as "path/to/file.rs:42" (line number identifies the chunk)
+        spec: String,
+        /// Number of results to return
+        #[arg(short, long, default_value_t = 5)]
+        k: usize,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -109,5 +132,7 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Deps { path, depth, json } => compat::deps::run(path, depth, json).await,
         Command::ReverseDeps { path, json } => compat::reverse_deps::run(path, json).await,
         Command::Cycles { path, json } => compat::cycles::run(path, json).await,
+        Command::Search { query, k, json } => compat::search::run(query, k, json).await,
+        Command::FindRelated { spec, k, json } => compat::find_related::run(spec, k, json).await,
     }
 }

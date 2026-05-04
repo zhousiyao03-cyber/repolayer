@@ -5,8 +5,10 @@
 pub mod cycles;
 pub mod deps;
 pub mod digest;
+pub mod find_related;
 pub mod outline;
 pub mod reverse_deps;
+pub mod search;
 pub mod show;
 pub mod surface;
 

@@ -561,39 +561,25 @@ fn emit_decl_nodes(
     Ok(())
 }
 
-// ── Import extraction (legacy path — kept for TS/JS relative imports) ─────────
+// ── Import extraction (via deps::extract) ─────────────────────────────────────
 
-/// Extract raw import specifiers from a source file using the legacy
-/// tree-sitter parsers. Returns an empty Vec for unsupported extensions.
-/// This bridges the gap until the adapters expose an import list natively
-/// (planned for Plan C).
+/// Extract raw import specifiers from a source file using `deps::extract`.
+/// Returns an empty Vec for unsupported extensions.
 fn extract_imports_for_file(abs_path: &Path) -> Vec<String> {
-    use crate::parser::Parser as _;
+    use crate::deps::resolver::build::Lang;
     let ext = abs_path.extension().and_then(|s| s.to_str()).unwrap_or("");
-    match ext {
-        "ts" | "tsx" | "js" | "jsx" | "mjs" => {
-            let p = crate::parser::typescript::TypeScriptParser::new();
-            match p.parse_file(abs_path) {
-                Ok(pf) => pf.imports,
-                Err(_) => Vec::new(),
-            }
-        }
-        "py" => {
-            let p = crate::parser::python::PythonParser::new();
-            match p.parse_file(abs_path) {
-                Ok(pf) => pf.imports,
-                Err(_) => Vec::new(),
-            }
-        }
-        "go" => {
-            let p = crate::parser::go::GoParser::new();
-            match p.parse_file(abs_path) {
-                Ok(pf) => pf.imports,
-                Err(_) => Vec::new(),
-            }
-        }
-        _ => Vec::new(),
-    }
+    let lang = match ext {
+        "ts" => Lang::TypeScript,
+        "tsx" => Lang::Tsx,
+        "js" | "jsx" | "mjs" => Lang::JavaScript,
+        "py" => Lang::Python,
+        "go" => Lang::Go,
+        _ => return Vec::new(),
+    };
+    crate::deps::extract::extract(abs_path, lang)
+        .into_iter()
+        .map(|i| i.spec)
+        .collect()
 }
 
 /// Derive a content hash using xxhash-rust (xxh3 128-bit) for change detection.

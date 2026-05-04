@@ -12,5 +12,4 @@ pub mod indexer;
 pub mod linker;
 pub mod llm;
 pub mod mcp;
-pub mod parser;
 pub mod query;

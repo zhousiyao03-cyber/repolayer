@@ -13,3 +13,7 @@ pub mod linker;
 pub mod llm;
 pub mod mcp;
 pub mod query;
+
+// Re-export helpers used by surface/ language resolvers.
+pub use adapters::parse_file;
+pub use adapters::walk_and_parse;

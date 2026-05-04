@@ -17,7 +17,7 @@ pub mod scala;
 pub mod markdown;
 pub mod idl;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use ast_grep_core::Language;
 use ast_grep_language::{LanguageExt, SupportLang};
 use crate::core::declaration::ParseResult;
@@ -61,4 +61,64 @@ pub fn parse_file(path: &Path) -> Option<ParseResult> {
     // Central marker enrichment so adapters stay focused on tree walking.
     populate_markers(&mut result.declarations, result.language);
     Some(result)
+}
+
+/// Walk a set of paths in parallel (respecting `.gitignore` / `.ast-outline-ignore`),
+/// parse each supported source file, and return all results sorted by path.
+///
+/// This mirrors the `walk_and_parse` helper from aeroxy/ast-outline and is used
+/// by the surface/ language resolvers (Scala, fallback) that need to scan an
+/// entire directory tree.
+pub fn walk_and_parse(paths: &[PathBuf], glob_str: Option<&str>) -> Vec<ParseResult> {
+    use ignore::WalkBuilder;
+
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    if paths.is_empty() {
+        return Vec::new();
+    }
+
+    // Filter out paths that don't exist.
+    let existing: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| p.exists())
+        .cloned()
+        .collect();
+    if existing.is_empty() {
+        return Vec::new();
+    }
+
+    let mut builder = WalkBuilder::new(&existing[0]);
+    for p in existing.iter().skip(1) {
+        builder.add(p);
+    }
+    builder.hidden(false);
+
+    if let Some(g) = glob_str {
+        if let Ok(override_builder) = ignore::overrides::OverrideBuilder::new("").add(g) {
+            if let Ok(over) = override_builder.build() {
+                builder.overrides(over);
+            }
+        }
+    }
+
+    let walker = builder.build_parallel();
+    walker.run(|| {
+        let tx = tx.clone();
+        Box::new(move |result| {
+            if let Ok(entry) = result {
+                if entry.file_type().is_some_and(|ft| ft.is_file()) {
+                    if let Some(parsed) = parse_file(entry.path()) {
+                        let _ = tx.send(parsed);
+                    }
+                }
+            }
+            ignore::WalkState::Continue
+        })
+    });
+
+    drop(tx);
+    let mut results: Vec<_> = rx.into_iter().collect();
+    results.sort_by(|a, b| a.path.cmp(&b.path));
+    results
 }

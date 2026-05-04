@@ -3,25 +3,12 @@ pub mod incremental;
 use crate::config::Config;
 use crate::graph::model::*;
 use crate::graph::store::Store;
-use crate::parser::typescript::TypeScriptParser;
+use crate::outline::store::OutlineStore;
+use crate::deps::store::DepStore;
+use crate::search::store::SearchStore;
 use anyhow::{Context, Result};
-
-fn parse_by_extension(
-    path: &std::path::Path,
-    ts_parser: &crate::parser::typescript::TypeScriptParser,
-    py_parser: &crate::parser::python::PythonParser,
-    go_parser: &crate::parser::go::GoParser,
-) -> Option<Result<crate::parser::ParsedFile>> {
-    use crate::parser::Parser as _;
-    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-    match ext {
-        "ts" | "tsx" | "js" | "jsx" | "mjs" => Some(ts_parser.parse_file(path)),
-        "py" => Some(py_parser.parse_file(path)),
-        "go" => Some(go_parser.parse_file(path)),
-        _ => None,
-    }
-}
 use ignore::WalkBuilder;
+use rayon::prelude::*;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
@@ -36,6 +23,9 @@ fn rel_path_str(rel: &Path) -> String {
 pub struct Indexer {
     pub workspace_root: PathBuf,
     pub store: Store,
+    pub outline_store: OutlineStore,
+    pub deps_store: DepStore,
+    pub search_store: SearchStore,
     pub config: Config,
 }
 
@@ -46,21 +36,41 @@ pub struct BuildStats {
 }
 
 impl Indexer {
+    /// Open all 4 SQLite stores under the same `.repolayer/` directory that
+    /// `db_path` lives in. `db_path` is expected to be `<workspace>/.repolayer/index.db`.
     pub fn new(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Result<Self> {
         let store = Store::open(&db_path)
             .with_context(|| format!("opening store at {}", db_path.display()))?;
+
+        let dir = db_path.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let outline_store = OutlineStore::open(&dir.join("outline.db"))
+            .with_context(|| format!("opening outline.db at {}", dir.display()))?;
+        let deps_store = DepStore::open(&dir.join("deps.db"))
+            .with_context(|| format!("opening deps.db at {}", dir.display()))?;
+        let search_store = SearchStore::open(&dir.join("search.db"))
+            .with_context(|| format!("opening search.db at {}", dir.display()))?;
+
         Ok(Self {
             workspace_root,
             store,
+            outline_store,
+            deps_store,
+            search_store,
             config,
         })
     }
 
     pub async fn build_all(&mut self) -> Result<BuildStats> {
         let mut stats = BuildStats::default();
+
+        // ── Phase A — parse + write each repo ─────────────────────────────────
+        // We need pkg_index for cross-repo import resolution inside index_repo_v2.
         let pkg_index =
             crate::linker::imports::PackageIndex::build(&self.workspace_root, &self.config)?;
+
         let repos = self.config.repos.clone();
+        let mut code_repos: Vec<(String, PathBuf)> = Vec::new();
+
         for repo_cfg in &repos {
             let repo_path = self.resolve_repo_path(&repo_cfg.path);
             let repo_name = repo_cfg.name.clone().unwrap_or_else(|| {
@@ -73,56 +83,67 @@ impl Indexer {
                 self.index_idl_repo(&repo_name, &repo_path, &mut stats)?;
                 continue;
             }
-            self.index_repo(&repo_name, &repo_path, &pkg_index, &mut stats)?;
+            self.index_repo_v2(&repo_name, &repo_path, &pkg_index, &mut stats)?;
+            code_repos.push((repo_name, repo_path));
         }
 
-        // After all repos indexed, link IDL methods to code modules
-        let code_repos: Vec<(String, PathBuf)> = self
-            .config
-            .repos
-            .iter()
-            .filter(|r| !r.is_idl())
-            .map(|r| {
-                let root = self.resolve_repo_path(&r.path);
-                let name = r.name.clone().unwrap_or_else(|| {
-                    root.file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "repo".to_string())
-                });
-                (name, root)
-            })
-            .collect();
+        // ── Phase B — cross-repo / IDL gluing (serial) ────────────────────────
+
+        // PackageIndex already built above for import resolution during Phase A.
+        // No additional cross-repo import pass needed here — import edges were
+        // inserted per-file during Phase A.
+
+        // deps::build_for_repo per non-IDL repo → DepStore
+        for (repo_name, repo_path) in &code_repos {
+            match crate::deps::build_for_repo(repo_path) {
+                Ok(graph) => {
+                    if let Err(e) = self.deps_store.replace_repo_graph(repo_name, &graph) {
+                        warn!("deps_store write failed for {}: {}", repo_name, e);
+                    }
+                }
+                Err(e) => warn!("deps::build_for_repo({}) failed: {}", repo_name, e),
+            }
+        }
+
+        // IdlLinker: Implements/Invokes edges in main graph
         let linker = crate::linker::idl_links::IdlLinker {
             store: &self.store,
-            repos: code_repos,
+            repos: code_repos.clone(),
         };
         let idl_edges = linker.link_all()?;
         stats.edges += idl_edges;
 
-        // Apply user-declared manual links (repolayer.yml links: section)
+        // Manual links from repolayer.yml
         let manual_edges = crate::linker::manual::apply_manual_links(&self.store, &self.config)?;
         stats.edges += manual_edges;
 
-        // Optional LLM-driven summaries
+        // ── Phase C — search index (chunker only; BM25/embed wiring is Plan C) ─
+        for (repo_name, repo_path) in &code_repos {
+            let files = match self.outline_store.list_files(repo_name) {
+                Ok(f) => f,
+                Err(e) => {
+                    warn!("outline_store.list_files({}) failed: {}", repo_name, e);
+                    continue;
+                }
+            };
+            let mut all_chunks = Vec::new();
+            for (_repo, rel) in &files {
+                let abs = repo_path.join(rel);
+                // chunk_file returns empty vec for unsupported extensions; safe to call always
+                let chunks = crate::search::chunker::chunk_file(&abs, rel);
+                all_chunks.extend(chunks);
+            }
+            if let Err(e) = self.search_store.replace_repo_chunks(repo_name, &all_chunks) {
+                warn!("search_store write failed for {}: {}", repo_name, e);
+            }
+        }
+        // TODO(Plan C): wire BM25 token inversion + embedding per chunk here.
+
+        // ── Phase D — optional LLM summaries (preserved from original) ─────────
         if let Some(llm_cfg) = &self.config.llm.clone() {
             if llm_cfg.enabled && llm_cfg.summary {
                 match build_llm_provider(llm_cfg) {
                     Ok(provider) => {
-                        let code_repos: Vec<(String, PathBuf)> = self
-                            .config
-                            .repos
-                            .iter()
-                            .filter(|r| !r.is_idl())
-                            .map(|r| {
-                                let root = self.resolve_repo_path(&r.path);
-                                let name = r.name.clone().unwrap_or_else(|| {
-                                    root.file_name()
-                                        .map(|n| n.to_string_lossy().to_string())
-                                        .unwrap_or_else(|| "repo".to_string())
-                                });
-                                (name, root)
-                            })
-                            .collect();
                         if let Err(e) = crate::llm::summary::summarize_modules(
                             &self.store,
                             provider,
@@ -142,6 +163,127 @@ impl Indexer {
         }
 
         Ok(stats)
+    }
+
+    /// Phase A: walk files in parallel (rayon), collect ParseResults, then
+    /// serially write to index.db + outline.db. Cross-repo import edges are
+    /// also resolved and written during the serial write phase.
+    fn index_repo_v2(
+        &mut self,
+        repo: &str,
+        root: &Path,
+        pkg_index: &crate::linker::imports::PackageIndex,
+        stats: &mut BuildStats,
+    ) -> Result<()> {
+        info!("indexing repo {} at {}", repo, root.display());
+        let repo_node = Node::new(NodeKind::Repo, repo, "", None);
+        self.store.upsert_node(&repo_node)?;
+        stats.nodes += 1;
+
+        // Collect all file paths first (serial walk is fast; the parse is the bottleneck)
+        let entries: Vec<PathBuf> = WalkBuilder::new(root)
+            .build()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path().to_path_buf())
+            .collect();
+
+        // Parallel parse phase — adapters::parse_file is the heavy tree-sitter work
+        // mpsc channel not needed: par_iter + collect is simpler and avoids Sync issues
+        let parsed: Vec<(PathBuf, crate::core::declaration::ParseResult)> = entries
+            .par_iter()
+            .filter_map(|p| crate::adapters::parse_file(p).map(|pr| (p.clone(), pr)))
+            .collect();
+
+        // Serial write phase — single SQLite connection; no concurrent writes needed
+        for (abs_path, parse_result) in parsed {
+            let rel = rel_path_str(abs_path.strip_prefix(root).unwrap_or(&abs_path));
+
+            // Module node + Contains edge from repo
+            let module_node = Node::new(NodeKind::Module, repo, &rel, None);
+            self.store.upsert_node(&module_node)?;
+            self.store.upsert_edge(&Edge {
+                from: repo_node.id.clone(),
+                to: module_node.id.clone(),
+                kind: EdgeKind::Contains,
+                confidence: 1.0,
+            })?;
+            stats.nodes += 1;
+            stats.edges += 1;
+
+            // Emit Type/Method/Function nodes from the Declaration tree
+            for decl in &parse_result.declarations {
+                emit_decl_nodes(
+                    &self.store,
+                    &repo_node.id,
+                    &module_node.id,
+                    repo,
+                    &rel,
+                    decl,
+                    None,
+                    stats,
+                )?;
+            }
+
+            // Resolve imports from the old parser's import list using the source path.
+            // NOTE: adapters::parse_file does not return an import list (it returns
+            // Declaration trees). For intra-repo and cross-repo import edges we fall
+            // back to the legacy parse_by_extension path only for TypeScript/JS files
+            // that have a simple relative-import model. Full import-edge wiring is
+            // preserved for Plan B; the new adapters provide the richer Declaration tree.
+            let imports = extract_imports_for_file(&abs_path);
+            for imp in &imports {
+                if let Some(target_path) = resolve_import(root, &abs_path, imp) {
+                    let target_rel_path = target_path.strip_prefix(root).unwrap_or(&target_path);
+                    let target_rel = rel_path_str(target_rel_path);
+                    let target_module = Node::new(NodeKind::Module, repo, &target_rel, None);
+                    self.store.upsert_node(&target_module)?;
+                    self.store.upsert_edge(&Edge {
+                        from: repo_node.id.clone(),
+                        to: target_module.id.clone(),
+                        kind: EdgeKind::Contains,
+                        confidence: 1.0,
+                    })?;
+                    self.store.upsert_edge(&Edge {
+                        from: module_node.id.clone(),
+                        to: target_module.id,
+                        kind: EdgeKind::Imports,
+                        confidence: 1.0,
+                    })?;
+                    stats.edges += 1;
+                } else if let Some(pkg) = pkg_index.lookup(imp) {
+                    let target_rel = pkg
+                        .main_relative
+                        .clone()
+                        .unwrap_or_else(|| "package.json".to_string());
+                    let target_module = Node::new(NodeKind::Module, &pkg.repo, &target_rel, None);
+                    self.store.upsert_node(&target_module)?;
+                    if pkg.main_relative.is_none() {
+                        let target_repo_node = Node::new(NodeKind::Repo, &pkg.repo, "", None);
+                        self.store.upsert_edge(&Edge {
+                            from: target_repo_node.id,
+                            to: target_module.id.clone(),
+                            kind: EdgeKind::Contains,
+                            confidence: 1.0,
+                        })?;
+                    }
+                    self.store.upsert_edge(&Edge {
+                        from: module_node.id.clone(),
+                        to: target_module.id,
+                        kind: EdgeKind::Imports,
+                        confidence: 1.0,
+                    })?;
+                    stats.edges += 1;
+                }
+                // External dep not in workspace — skip silently.
+            }
+
+            // Outline store: upsert (repo, path) row with full Declaration tree
+            let content_hash = hash_source(&parse_result.source);
+            self.outline_store.upsert(repo, &parse_result, &content_hash)?;
+        }
+
+        Ok(())
     }
 
     fn index_idl_repo(&mut self, repo: &str, root: &Path, stats: &mut BuildStats) -> Result<()> {
@@ -285,6 +427,7 @@ impl Indexer {
                 confidence: 1.0,
             })?;
         }
+        // TODO(B-24): also invalidate outline.db / deps.db / search.db per file
         Ok(())
     }
 
@@ -295,129 +438,177 @@ impl Indexer {
             self.workspace_root.join(p)
         }
     }
+}
 
-    fn index_repo(
-        &mut self,
-        repo: &str,
-        root: &Path,
-        pkg_index: &crate::linker::imports::PackageIndex,
-        stats: &mut BuildStats,
-    ) -> Result<()> {
-        info!("indexing repo {} at {}", repo, root.display());
-        let repo_node = Node::new(NodeKind::Repo, repo, "", None);
-        self.store.upsert_node(&repo_node)?;
-        stats.nodes += 1;
+// ── Declaration tree → graph nodes ────────────────────────────────────────────
 
-        let ts_parser = TypeScriptParser::new();
-        let py_parser = crate::parser::python::PythonParser::new();
-        let go_parser = crate::parser::go::GoParser::new();
+/// Recursively walk a `Declaration` tree and emit `Type`, `Method`, and
+/// `Function` nodes + `Contains` edges into `store`.
+///
+/// Mapping:
+/// - Class/Struct/Interface/Record/Enum → `NodeKind::Type`; children recurse
+///   with `parent_type_id` set.
+/// - Method/Constructor/Destructor/Operator inside a Type → `NodeKind::Method`
+/// - Function (or top-level Method) → `NodeKind::Function`
+/// - Namespace → descend without emitting a node (Go package, C# namespace)
+/// - Field/Property/EnumMember/… → skip (live in outline.db only)
+#[allow(clippy::too_many_arguments)]
+fn emit_decl_nodes(
+    store: &Store,
+    _repo_node_id: &str,
+    module_node_id: &str,
+    repo: &str,
+    path: &str,
+    decl: &crate::core::declaration::Declaration,
+    parent_type_id: Option<&str>,
+    stats: &mut BuildStats,
+) -> Result<()> {
+    use crate::core::declaration::DeclarationKind;
 
-        for entry in WalkBuilder::new(root).build() {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!("walk error: {}", e);
-                    continue;
-                }
-            };
-            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                continue;
-            }
-            let path = entry.path();
-            let rel = rel_path_str(path.strip_prefix(root).unwrap_or(path));
-            let parsed = match parse_by_extension(path, &ts_parser, &py_parser, &go_parser) {
-                None => continue,
-                Some(Err(e)) => {
-                    warn!("skip {}: {}", path.display(), e);
-                    continue;
-                }
-                Some(Ok(p)) => p,
-            };
-
-            let module_node = Node::new(NodeKind::Module, repo, &rel, None);
-            self.store.upsert_node(&module_node)?;
-            self.store.upsert_edge(&Edge {
-                from: repo_node.id.clone(),
-                to: module_node.id.clone(),
+    match decl.kind {
+        DeclarationKind::Class
+        | DeclarationKind::Struct
+        | DeclarationKind::Interface
+        | DeclarationKind::Record
+        | DeclarationKind::Enum => {
+            let mut n = Node::new(NodeKind::Type, repo, path, Some(&decl.name));
+            n.loc_start = Some(decl.start_line as u32);
+            n.loc_end = Some(decl.end_line as u32);
+            n.visibility = Some(decl.visibility.clone());
+            n.native_kind = decl.native_kind.clone();
+            n.deprecated = decl.deprecated;
+            store.upsert_node(&n)?;
+            let parent_id = parent_type_id.unwrap_or(module_node_id);
+            store.upsert_edge(&Edge {
+                from: parent_id.into(),
+                to: n.id.clone(),
                 kind: EdgeKind::Contains,
                 confidence: 1.0,
             })?;
             stats.nodes += 1;
             stats.edges += 1;
 
-            for sym in &parsed.symbols {
-                let mut sn = Node::new(NodeKind::Function, repo, &rel, Some(&sym.name));
-                sn.loc_start = Some(sym.loc_start);
-                sn.loc_end = Some(sym.loc_end);
-                self.store.upsert_node(&sn)?;
-                self.store.upsert_edge(&Edge {
-                    from: module_node.id.clone(),
-                    to: sn.id.clone(),
-                    kind: EdgeKind::Contains,
-                    confidence: 1.0,
-                })?;
-                stats.nodes += 1;
-                stats.edges += 1;
-            }
-
-            for imp in &parsed.imports {
-                if let Some(target_path) = resolve_import(root, path, imp) {
-                    let target_rel_path = target_path.strip_prefix(root).unwrap_or(&target_path);
-                    let target_rel = rel_path_str(target_rel_path);
-                    let target_module = Node::new(NodeKind::Module, repo, &target_rel, None);
-                    // upsert_node is idempotent — safe to call even if walker will visit this file later
-                    self.store.upsert_node(&target_module)?;
-                    // Pre-register Contains edge so no module is ever an orphan. We do NOT
-                    // count this in stats.edges: the walker will visit the target file and
-                    // count the (idempotent) Contains upsert there, so we avoid double-counting.
-                    self.store.upsert_edge(&Edge {
-                        from: repo_node.id.clone(),
-                        to: target_module.id.clone(),
-                        kind: EdgeKind::Contains,
-                        confidence: 1.0,
-                    })?;
-                    self.store.upsert_edge(&Edge {
-                        from: module_node.id.clone(),
-                        to: target_module.id,
-                        kind: EdgeKind::Imports,
-                        confidence: 1.0,
-                    })?;
-                    stats.edges += 1;
-                } else if let Some(pkg) = pkg_index.lookup(imp) {
-                    // Cross-repo import: link to the target package's main module (or root)
-                    let target_rel = pkg
-                        .main_relative
-                        .clone()
-                        .unwrap_or_else(|| "package.json".to_string());
-                    let target_module = Node::new(NodeKind::Module, &pkg.repo, &target_rel, None);
-                    self.store.upsert_node(&target_module)?;
-                    // If we synthesized the path (no `main` field), explicitly connect it to the
-                    // target repo node so it's not orphaned. Walker won't create this node for us
-                    // because package.json isn't a .ts/.py/.go file.
-                    if pkg.main_relative.is_none() {
-                        let target_repo_node = Node::new(NodeKind::Repo, &pkg.repo, "", None);
-                        self.store.upsert_edge(&Edge {
-                            from: target_repo_node.id,
-                            to: target_module.id.clone(),
-                            kind: EdgeKind::Contains,
-                            confidence: 1.0,
-                        })?;
-                        // Don't bump stats.edges — this synthesized Contains is a side effect of
-                        // the Imports edge we're creating, not a primary traversal edge.
-                    }
-                    self.store.upsert_edge(&Edge {
-                        from: module_node.id.clone(),
-                        to: target_module.id,
-                        kind: EdgeKind::Imports,
-                        confidence: 1.0,
-                    })?;
-                    stats.edges += 1;
-                }
-                // Otherwise: external dep not in our workspace, skip silently.
+            // Recurse into children with this type as the parent context
+            for child in &decl.children {
+                emit_decl_nodes(
+                    store,
+                    _repo_node_id,
+                    module_node_id,
+                    repo,
+                    path,
+                    child,
+                    Some(&n.id),
+                    stats,
+                )?;
             }
         }
-        Ok(())
+
+        DeclarationKind::Method
+        | DeclarationKind::Constructor
+        | DeclarationKind::Destructor
+        | DeclarationKind::Operator => {
+            let mut n = Node::new(NodeKind::Method, repo, path, Some(&decl.name));
+            n.loc_start = Some(decl.start_line as u32);
+            n.loc_end = Some(decl.end_line as u32);
+            n.visibility = Some(decl.visibility.clone());
+            n.deprecated = decl.deprecated;
+            store.upsert_node(&n)?;
+            let parent_id = parent_type_id.unwrap_or(module_node_id);
+            store.upsert_edge(&Edge {
+                from: parent_id.into(),
+                to: n.id.clone(),
+                kind: EdgeKind::Contains,
+                confidence: 1.0,
+            })?;
+            stats.nodes += 1;
+            stats.edges += 1;
+        }
+
+        DeclarationKind::Function => {
+            let mut n = Node::new(NodeKind::Function, repo, path, Some(&decl.name));
+            n.loc_start = Some(decl.start_line as u32);
+            n.loc_end = Some(decl.end_line as u32);
+            n.visibility = Some(decl.visibility.clone());
+            n.deprecated = decl.deprecated;
+            store.upsert_node(&n)?;
+            store.upsert_edge(&Edge {
+                from: module_node_id.into(),
+                to: n.id.clone(),
+                kind: EdgeKind::Contains,
+                confidence: 1.0,
+            })?;
+            stats.nodes += 1;
+            stats.edges += 1;
+        }
+
+        DeclarationKind::Namespace => {
+            // Don't emit a node for namespaces — just descend.
+            // (Go package declarations, C# namespaces)
+            for child in &decl.children {
+                emit_decl_nodes(
+                    store,
+                    _repo_node_id,
+                    module_node_id,
+                    repo,
+                    path,
+                    child,
+                    parent_type_id,
+                    stats,
+                )?;
+            }
+        }
+
+        // Field, Property, EnumMember, Indexer, Event, Delegate, Heading, CodeBlock
+        // → live in outline.db only; skip in main graph.
+        _ => {}
     }
+    Ok(())
+}
+
+// ── Import extraction (legacy path — kept for TS/JS relative imports) ─────────
+
+/// Extract raw import specifiers from a source file using the legacy
+/// tree-sitter parsers. Returns an empty Vec for unsupported extensions.
+/// This bridges the gap until the adapters expose an import list natively
+/// (planned for Plan C).
+fn extract_imports_for_file(abs_path: &Path) -> Vec<String> {
+    use crate::parser::Parser as _;
+    let ext = abs_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    match ext {
+        "ts" | "tsx" | "js" | "jsx" | "mjs" => {
+            let p = crate::parser::typescript::TypeScriptParser::new();
+            match p.parse_file(abs_path) {
+                Ok(pf) => pf.imports,
+                Err(_) => Vec::new(),
+            }
+        }
+        "py" => {
+            let p = crate::parser::python::PythonParser::new();
+            match p.parse_file(abs_path) {
+                Ok(pf) => pf.imports,
+                Err(_) => Vec::new(),
+            }
+        }
+        "go" => {
+            let p = crate::parser::go::GoParser::new();
+            match p.parse_file(abs_path) {
+                Ok(pf) => pf.imports,
+                Err(_) => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+/// Derive a content hash using xxhash-rust (xxh3 128-bit) for change detection.
+/// Returns 16 bytes. Falls back to all-zeros on empty source.
+fn hash_source(src: &[u8]) -> Vec<u8> {
+    use xxhash_rust::xxh3::xxh3_128;
+    if src.is_empty() {
+        return vec![0u8; 16];
+    }
+    let h = xxh3_128(src);
+    h.to_le_bytes().to_vec()
 }
 
 fn build_llm_provider(
@@ -443,8 +634,6 @@ fn resolve_import(repo_root: &Path, from_file: &Path, spec: &str) -> Option<Path
     let dir = from_file.parent()?;
     let candidate = dir.join(spec);
     for ext in ["ts", "tsx", "js", "jsx", "mjs"] {
-        // Use manual append instead of with_extension() to avoid clobbering dots
-        // already in the import path (e.g. "./a.test" -> "./a.test.ts" not "./a.ts").
         let mut with_ext_os = candidate.clone().into_os_string();
         with_ext_os.push(".");
         with_ext_os.push(ext);

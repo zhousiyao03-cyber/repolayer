@@ -11,6 +11,7 @@ pub mod typescript;
 pub mod go;
 pub mod rust;
 pub mod csharp;
+pub mod java;
 // Adapters land here in tasks 3-11:
 // pub mod rust;
 // pub mod csharp;

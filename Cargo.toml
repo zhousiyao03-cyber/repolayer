@@ -28,6 +28,7 @@ tree-sitter-typescript = "0.23"
 tree-sitter-javascript = "0.23"
 tree-sitter-go = "0.23"
 tree-sitter-python = "0.23"
+tree-sitter-md = "0.5.3"
 ignore = "0.4"
 regex = "1.10"
 rmcp = { version = "1.6.0", features = ["server", "transport-io", "macros"] }

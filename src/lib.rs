@@ -1,6 +1,7 @@
 pub mod core;
 pub mod adapters;
 pub mod outline;
+pub mod surface;
 pub mod deps;
 pub mod search;
 pub mod cli;

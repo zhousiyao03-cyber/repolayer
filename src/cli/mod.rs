@@ -5,6 +5,7 @@ use std::path::PathBuf;
 pub mod build;
 pub mod compat;
 pub mod init;
+pub mod install;
 pub mod query;
 pub mod serve;
 pub mod update;
@@ -112,6 +113,12 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Install repolayer as an MCP server in an AI agent's config
+    Install {
+        /// Agent name (claude-code / cursor / gemini / codex / copilot)
+        #[arg(long)]
+        mcp: String,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -134,5 +141,6 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Cycles { path, json } => compat::cycles::run(path, json).await,
         Command::Search { query, k, json } => compat::search::run(query, k, json).await,
         Command::FindRelated { spec, k, json } => compat::find_related::run(spec, k, json).await,
+        Command::Install { mcp } => install::run(&mcp).await,
     }
 }

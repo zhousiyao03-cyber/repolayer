@@ -15,10 +15,10 @@ fn make_chunk(path: &str, line: u32, content: &str) -> Chunk {
 }
 
 #[test]
-fn open_writes_schema_version_1() {
+fn open_writes_schema_version_2() {
     let dir = tempdir().unwrap();
     let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 1);
+    assert_eq!(s.schema_version().unwrap(), 2);
 }
 
 #[test]
@@ -84,4 +84,61 @@ fn chunk_fields_preserved() {
     assert_eq!(*start, 42u32);
     assert_eq!(*end, 47u32);
     assert!(content.contains("answer"));
+}
+
+fn unit_vec(at: usize) -> Vec<f32> {
+    let mut v = vec![0.0f32; 256];
+    v[at] = 1.0;
+    v
+}
+
+#[test]
+fn vec0_round_trip_and_knn() {
+    let dir = tempdir().unwrap();
+    let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
+    s.replace_repo_chunks(
+        "r",
+        &[
+            make_chunk("a.rs", 1, "alpha alpha"),
+            make_chunk("b.rs", 1, "beta"),
+            make_chunk("c.rs", 1, "gamma"),
+        ],
+    )
+    .unwrap();
+    // ids will be 1, 2, 3 (autoincrement)
+    s.upsert_embedding(1, &unit_vec(0)).unwrap();
+    s.upsert_embedding(2, &unit_vec(10)).unwrap();
+    s.upsert_embedding(3, &unit_vec(20)).unwrap();
+
+    assert_eq!(s.embedding_count().unwrap(), 3);
+
+    let hits = s.knn_search(&unit_vec(0), 2).unwrap();
+    assert_eq!(hits.len(), 2);
+    // closest match should be chunk 1 (identical vector → distance 0)
+    assert_eq!(hits[0].0, 1);
+    assert!(hits[0].1 < 0.0001, "distance was {}", hits[0].1);
+}
+
+#[test]
+fn replace_repo_chunks_clears_vectors() {
+    let dir = tempdir().unwrap();
+    let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
+    s.replace_repo_chunks("r", &[make_chunk("a.rs", 1, "alpha")])
+        .unwrap();
+    s.upsert_embedding(1, &unit_vec(0)).unwrap();
+    assert_eq!(s.embedding_count().unwrap(), 1);
+
+    // Replace wipes both chunks AND their vectors
+    s.replace_repo_chunks("r", &[make_chunk("b.rs", 1, "beta")])
+        .unwrap();
+    assert_eq!(s.embedding_count().unwrap(), 0);
+}
+
+#[test]
+fn knn_search_dim_check() {
+    let dir = tempdir().unwrap();
+    let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
+    let bad = vec![0.0f32; 8];
+    let err = s.knn_search(&bad, 1).unwrap_err();
+    assert!(err.to_string().contains("256"), "{}", err);
 }

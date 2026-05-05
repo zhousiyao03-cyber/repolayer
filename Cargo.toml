@@ -1,10 +1,10 @@
 [package]
 name = "repolayer"
-version = "0.1.0"
+version = "0.2.0-alpha"
 edition = "2021"
 license = "MIT"
-description = "Cross-repo agent index layer. Stop dumping 400k tokens — index your repos once, query like a database."
-repository = "https://github.com/zhousiyao03/repolayer"
+description = "Cross-repo extension of ast-outline — multi-repo graph + IDL linking + 15 MCP tools for AI agents."
+repository = "https://github.com/zhousiyao03-cyber/repolayer"
 keywords = ["agent", "mcp", "code-search", "monorepo", "ai"]
 categories = ["command-line-utilities", "development-tools"]
 

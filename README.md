@@ -1,48 +1,92 @@
 # repolayer
 
-> Stop dumping 400k tokens. Index your repos once, let agents query like a database.
+> repolayer = ast-outline ([aeroxy/ast-outline](https://github.com/aeroxy/ast-outline)) + cross-repo graph + IDL linking + MCP server tailored for multi-repo agent workflows.
 
-`repolayer` is a cross-repo index layer for AI coding agents (Claude Code, Cursor, Codex, …). It pre-computes a structured graph of one or more repositories — modules, exported symbols, call relations, IDL contracts — and exposes it via [MCP](https://modelcontextprotocol.io/). Your agent fetches a precise minimal context (2k-5k tokens) instead of brute-forcing 400k tokens of `grep` and `read`.
+Built on top of [aeroxy/ast-outline](https://github.com/aeroxy/ast-outline)'s parsing, IR, dep-graph, and hybrid search. Extends with: multi-repo workspace model, IDL (protobuf/thrift) as first-class graph nodes, cross-repo import resolution, manual cross-repo links, and 6 MCP tools focused on multi-repo navigation in addition to the 9 inherited from ast-outline.
 
-## Status
+## Status: v0.2.0-alpha
 
-**Pre-alpha (`v0.0.2-alpha`).** Phase 2 complete: multi-repo indexing, IDL (protobuf/thrift), MCP server, incremental update. Phase 3 (LLM enhancement, dogfooding, public release) is up next.
+- 15 MCP tools (6 native + 9 ast-outline-compat)
+- 4 SQLite stores: `index.db` (graph), `outline.db` (per-file Declaration trees), `deps.db` (file-level dependency graph), `search.db` (BM25 + dense embedding chunks)
+- 10 source-language adapters via `ast-grep-core`: Rust / C# / Python / TypeScript / JavaScript / Java / Kotlin / Scala / Go / Markdown
+- 2 IDL parsers (bare tree-sitter): protobuf / thrift
+- Single static binary (~47 MB release)
 
-## Phase 2 capabilities
+## When to use repolayer vs ast-outline
 
-- **Multi-repo indexing** with cross-repo import resolution (TS via `package.json` name lookup)
-- **IDL graph** — `.proto` and `.thrift` services and methods become first-class graph nodes
-- **`IMPLEMENTS` / `INVOKES` edges** automatically detected via path heuristic (e.g. `services/` → server, otherwise client)
-- **Manual cross-repo links** declared in `repolayer.yml` for HTTP / RPC / opaque dependencies
-- **MCP server** exposing 5 tools to Claude Code / Cursor / any MCP-compatible agent:
-  - `find_context(task_description, budget_tokens)` — minimal relevant context for a coding task
-  - `get_symbol(name, repo?)` — definition + callers + callees of a symbol, cross-repo
-  - `get_callers(symbol, depth)` — reverse call chain
-  - `get_dependencies(repo_or_module, depth)` — forward dependency graph
-  - `list_repos()` — currently indexed repos with metadata
-- **Incremental update** via `git diff` — only re-parse changed files
-- 4 source-language parsers (TypeScript / JavaScript / Python / Go)
-- 2 IDL parsers (protobuf / thrift)
-- SQLite-backed graph (`.repolayer/index.db`) with stable SHA256 node IDs
-- Substring symbol search via `repolayer query`
+- **Single repo, just want outline / show / search** → use [ast-outline](https://github.com/aeroxy/ast-outline) directly. Smaller binary, no index to maintain.
+- **Multi-repo workspace, microservice with IDL contracts, agent that needs cross-repo navigation** → repolayer is the natural extension.
 
-## Quickstart (build from source)
-
-Requires Rust 1.75+.
+## Install
 
 ```bash
-git clone https://github.com/zhousiyao03/repolayer
+git clone https://github.com/zhousiyao03-cyber/repolayer
 cd repolayer
 cargo install --path .
-
-# In your workspace:
-repolayer init                   # create repolayer.yml
-# edit repolayer.yml to point at your repos, then:
-repolayer build                  # full build → .repolayer/index.db
-repolayer query "auth"           # substring search
-repolayer update                 # incremental re-index of changed files
-repolayer serve                  # start MCP server (stdio, for Claude Code)
 ```
+
+Requires Rust 1.75+. Installs `repolayer` to `~/.cargo/bin`. (cargo-dist binaries planned for v0.2.1.)
+
+## Quickstart
+
+```bash
+repolayer init               # creates repolayer.yml
+# edit repolayer.yml — see Configuration below
+repolayer build              # full index → 4 SQLite files in .repolayer/
+repolayer update             # incremental re-index of git-changed files
+repolayer serve              # MCP stdio server (for AI agents)
+```
+
+## Connecting AI agents
+
+```bash
+repolayer install --mcp claude-code   # writes claude_desktop_config.json
+repolayer install --mcp cursor        # writes ~/.cursor/mcp.json
+repolayer install --mcp gemini        # writes ~/.config/gemini-cli/config.json
+repolayer install --mcp codex         # writes ~/.config/codex/mcp.json
+```
+
+Restart your agent after install. Then teach it which tool to call when:
+
+```bash
+repolayer prompt >> CLAUDE.md
+repolayer prompt >> AGENTS.md
+```
+
+## CLI subcommands (16 total)
+
+```
+# repolayer-native
+repolayer init / build / update / serve / query / install / prompt
+
+# ast-outline-compat
+repolayer outline <paths>             # signatures + line ranges, no method bodies
+repolayer show <file> <Symbol>        # source body of a symbol
+repolayer digest <paths>              # one-page module map
+repolayer surface [path]              # published API (resolves pub use / __all__ / barrels)
+repolayer deps <path>                 # forward import dependencies
+repolayer reverse-deps <path>         # who imports this (refactor blast radius)
+repolayer cycles                      # find import cycles via Tarjan SCC (CI-gateable)
+repolayer search "<query>"            # BM25 + semantic search
+repolayer find-related <file:line>    # similar code chunks
+```
+
+Every command also accepts `--json` for machine-readable output.
+
+## MCP tools (15 total)
+
+**6 repolayer-native:**
+- `find_context(task_description, budget_tokens)` — minimal relevant context across all repos, with cross-repo edges
+- `get_symbol(name, repo?)` — definition + callers + callees
+- `get_callers(symbol, depth)` — reverse call graph
+- `get_dependencies(repo_or_module, depth)` — forward dep graph
+- `list_repos()` — indexed repos with metadata
+- `find_idl_impl(method, service?)` — IDL method to code implementations across repos
+
+**9 ast-outline-compat:**
+- `outline / show / digest / surface / deps / reverse_deps / cycles / search / find_related`
+
+Every response is wrapped with a stable `schema_version: "<id>.v1"` field for client integration.
 
 ## Configuration (`repolayer.yml`)
 
@@ -53,43 +97,50 @@ repos:
   - path: ../my_idl_repo
     type: idl                # IDL repos define cross-cutting service contracts
 
-# Optional: declare cross-repo dependencies that aren't visible from import statements
+# Optional: declare cross-repo dependencies that aren't visible from imports
 links:
   - from: bff
     to: backend_api
     kind: http               # or rpc / calls / invokes
 
-# Optional (Phase 3, not yet wired): LLM-driven summaries / query translation
-# llm:
-#   enabled: false
-#   provider: anthropic
-#   api_key_env: ANTHROPIC_API_KEY
+# Optional: LLM-driven module summaries
+llm:
+  enabled: false
+  provider: anthropic        # or deepseek
+  api_key_env: ANTHROPIC_API_KEY
+  summary: false
 ```
 
-## Connecting to Claude Code
+## Architecture
 
-Add to your Claude Code MCP config:
-
-```json
-{
-  "mcpServers": {
-    "repolayer": {
-      "command": "/path/to/repolayer",
-      "args": ["serve"],
-      "cwd": "/path/to/your/workspace"
-    }
-  }
-}
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│  MCP server (rmcp stdio) + 16 CLI subcommands                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Query layer                                                    │
+│   find_context / get_symbol / get_callers / find_idl_impl       │
+│   outline / show / digest / surface / deps / reverse-deps       │
+│   cycles / search / find-related                                │
+├─────────────────────────────────────────────────────────────────┤
+│  Storage (4 independent SQLite stores in .repolayer/)           │
+│   index.db    main graph (cross-repo + IDL)                     │
+│   outline.db  per-file Declaration trees                        │
+│   deps.db     file-level dependency graph                       │
+│   search.db   BM25 + dense embedding chunks                     │
+├─────────────────────────────────────────────────────────────────┤
+│  Parser layer                                                   │
+│   adapters/      10 source-language adapters (ast-grep-core)    │
+│   adapters/idl/  protobuf + thrift (bare tree-sitter)           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+See [`docs/superpowers/specs/2026-05-04-ast-outline-extension-design.md`](docs/superpowers/specs/2026-05-04-ast-outline-extension-design.md) for the full design.
 
 ## Roadmap
 
-- **Phase 3** (in progress): optional LLM enhancement (Anthropic / DeepSeek summaries, embedding-based reranking), real-world dogfooding on multi-repo microservice systems, public `v0.1.0` release with cross-platform binaries via `cargo-dist`.
-
-## Why Rust?
-
-Single static binary distribution, native [tree-sitter](https://tree-sitter.github.io/) bindings, zero runtime dependencies for end users.
+- **v0.2.1**: cargo-dist cross-platform release binaries; per-file incremental deps + search update; full BM25+dense fusion in `search` command (currently substring fallback)
+- **v0.3**: real call graph extraction (Calls edges); HTTP transport for MCP
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE) for adopted ast-outline components.

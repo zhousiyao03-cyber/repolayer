@@ -143,7 +143,15 @@ fn scan_file(
         .join("/");
     let module_node = Node::new(NodeKind::Module, code_repo, &rel, None);
 
-    let is_server_side = path_suggests_server(&rel);
+    // server-side classification requires BOTH:
+    //   (a) a path that hints at server impl (`services/`, `handlers/`, …)
+    //   (b) a backend source language (Go / Python / Rust / Java / Kotlin / Scala)
+    // Without (b) the heuristic mis-fires on frontend `src/services/api/` API
+    // client directories, where a TS/TSX file has no business being marked as
+    // implementing a backend RPC method.
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let is_backend_lang = matches!(ext, "go" | "py" | "rs" | "java" | "kt" | "scala");
+    let is_server_side = is_backend_lang && path_suggests_server(&rel);
     let lang_opt = SupportLang::from_path(path);
 
     // Parse the file ONCE; collect ALL call-expression callees.
@@ -153,12 +161,18 @@ fn scan_file(
     let mut out = Vec::new();
     for &idx in &hit_indices {
         let short = &unique_names[idx];
+        let candidates = &by_name[short];
+        // Ambiguous when ≥ 2 IDL methods share this short name (e.g.
+        // 3 different services all defining `GetData`). We can't tell
+        // which one the call refers to; downgrade confidence so callers
+        // know the edge is a guess.
+        let ambiguous = candidates.len() > 1;
         let in_call = callees
             .as_ref()
             .map(|set| set.contains(short.as_str()))
             .unwrap_or(false);
 
-        let confidence: Option<f32> = if in_call {
+        let base_conf: Option<f32> = if in_call {
             Some(0.7)
         } else if is_server_side || lang_opt.is_none() {
             // server-side path heuristic, or unknown language (substring is the best we have)
@@ -167,14 +181,17 @@ fn scan_file(
             None
         };
 
-        let Some(conf) = confidence else { continue };
+        let Some(mut conf) = base_conf else { continue };
+        if ambiguous {
+            conf *= 0.5;
+        }
         let edge_kind = if is_server_side {
             EdgeKind::Implements
         } else {
             EdgeKind::Invokes
         };
 
-        for m_node_id in &by_name[short] {
+        for m_node_id in candidates {
             out.push(Edge {
                 from: module_node.id.clone(),
                 to: m_node_id.clone(),

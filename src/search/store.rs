@@ -16,6 +16,10 @@ use crate::search::embed::DIM;
 /// Row returned by [`SearchStore::list_chunks`]: `(id, path, start_line, end_line, content)`.
 pub type ChunkRow = (i64, String, u32, u32, String);
 
+/// Row returned by [`SearchStore::list_all_chunks`]: same as `ChunkRow` but
+/// with the repo name in slot 1.
+pub type ChunkRowWithRepo = (i64, String, String, u32, u32, String);
+
 const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
@@ -241,7 +245,7 @@ impl SearchStore {
     /// List every chunk across every repo. Returns
     /// `(id, repo, path, start_line, end_line, content)` rows. Used by
     /// `search_hybrid` so it can build an in-memory BM25 index.
-    pub fn list_all_chunks(&self) -> Result<Vec<(i64, String, String, u32, u32, String)>> {
+    pub fn list_all_chunks(&self) -> Result<Vec<ChunkRowWithRepo>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, repo, path, start_line, end_line, content FROM chunks ORDER BY id",
         )?;

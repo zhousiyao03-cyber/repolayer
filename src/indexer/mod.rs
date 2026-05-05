@@ -117,7 +117,8 @@ impl Indexer {
         let manual_edges = crate::linker::manual::apply_manual_links(&self.store, &self.config)?;
         stats.edges += manual_edges;
 
-        // ── Phase C — search index (chunker only; BM25/embed wiring is Plan C) ─
+        // ── Phase C — search index (chunks + dense embeddings) ────────────────
+        // Step 1: write chunks for every repo.
         for (repo_name, repo_path) in &code_repos {
             let files = match self.outline_store.list_files(repo_name) {
                 Ok(f) => f,
@@ -137,7 +138,31 @@ impl Indexer {
                 warn!("search_store write failed for {}: {}", repo_name, e);
             }
         }
-        // TODO(Plan C): wire BM25 token inversion + embedding per chunk here.
+
+        // Step 2: try to embed every chunk.
+        //
+        // Policy: download the ~64 MB potion-code-16M model only when the user
+        // has opted in with `REPOLAYER_DOWNLOAD=1`. Once the model is in the
+        // cache (or AST_OUTLINE_MODEL_DIR points to one), subsequent builds
+        // embed automatically without the env var. If the model isn't present,
+        // we log a one-line hint and fall through — search will use the
+        // BM25/substring path.
+        match try_embed(&self.search_store, &code_repos) {
+            EmbedOutcome::Done(n) => info!("embedded {} chunks into search.db", n),
+            EmbedOutcome::Skipped(reason) => {
+                info!(
+                    "embedding step skipped ({}); search will fall back to BM25/substring. \
+                     Set REPOLAYER_DOWNLOAD=1 to fetch the embedding model (~64 MB).",
+                    reason
+                );
+            }
+            EmbedOutcome::Failed(err) => {
+                warn!(
+                    "embedding step failed ({}); search will fall back to BM25/substring",
+                    err
+                );
+            }
+        }
 
         // ── Phase D — optional LLM summaries (preserved from original) ─────────
         if let Some(llm_cfg) = &self.config.llm.clone() {
@@ -600,6 +625,90 @@ fn hash_source(src: &[u8]) -> Vec<u8> {
     }
     let h = xxh3_128(src);
     h.to_le_bytes().to_vec()
+}
+
+/// Result of the embedding phase. Used by `Indexer::build_all` to decide
+/// what to log (info vs warn).
+enum EmbedOutcome {
+    /// Successfully embedded `n` chunks across all repos.
+    Done(usize),
+    /// Skipped without trying — model isn't in cache and the user hasn't
+    /// opted into a download. The string explains the precise cause.
+    Skipped(&'static str),
+    /// Tried but failed (download error, corrupt model, …). Reported as a
+    /// warn but never aborts the build.
+    Failed(anyhow::Error),
+}
+
+/// Look for a cached potion-code-16M model. Honours `AST_OUTLINE_MODEL_DIR`
+/// (the same env var `download::cache_root` uses) so users with custom
+/// caches don't need to re-download.
+fn cached_model_present() -> bool {
+    use crate::search::download::{model_dir, ModelInfo};
+    let Ok(dir) = model_dir(&ModelInfo::potion_code_16m()) else {
+        return false;
+    };
+    dir.join("model.safetensors").is_file()
+        && dir.join("tokenizer.json").is_file()
+        && dir.join("manifest.json").is_file()
+}
+
+/// Embed every chunk in `search.db` for each of the supplied repos.
+///
+/// Decides based on env vars + cache state whether to download, embed, or
+/// skip. Never panics; turns I/O errors into [`EmbedOutcome::Failed`].
+fn try_embed(
+    store: &crate::search::store::SearchStore,
+    repos: &[(String, std::path::PathBuf)],
+) -> EmbedOutcome {
+    use crate::search::download::{ensure_model, ModelInfo};
+    use crate::search::embed::Embedder;
+
+    let opt_in_download = std::env::var("REPOLAYER_DOWNLOAD")
+        .ok()
+        .filter(|v| !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false"))
+        .is_some();
+    let no_download = std::env::var_os("REPOLAYER_NO_DOWNLOAD").is_some();
+
+    let cached = cached_model_present();
+    if no_download && !cached {
+        return EmbedOutcome::Skipped("REPOLAYER_NO_DOWNLOAD is set and model isn't cached");
+    }
+    if !opt_in_download && !cached {
+        return EmbedOutcome::Skipped("model not cached and REPOLAYER_DOWNLOAD not set");
+    }
+
+    let info = ModelInfo::potion_code_16m();
+    let model_dir = match ensure_model(&info) {
+        Ok(d) => d,
+        Err(e) => return EmbedOutcome::Failed(anyhow::anyhow!("download failed: {}", e)),
+    };
+    let embedder = match Embedder::open(&model_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            return EmbedOutcome::Failed(anyhow::anyhow!(
+                "loading embedder from {}: {}",
+                model_dir.display(),
+                e
+            ))
+        }
+    };
+
+    let mut total = 0usize;
+    for (repo_name, _) in repos {
+        let chunks = match store.list_chunks(repo_name) {
+            Ok(c) => c,
+            Err(e) => return EmbedOutcome::Failed(e),
+        };
+        for (id, _path, _s, _e, content) in &chunks {
+            let v = embedder.encode_one(content);
+            if let Err(e) = store.upsert_embedding(*id, &v) {
+                return EmbedOutcome::Failed(e);
+            }
+        }
+        total += chunks.len();
+    }
+    EmbedOutcome::Done(total)
 }
 
 fn build_llm_provider(

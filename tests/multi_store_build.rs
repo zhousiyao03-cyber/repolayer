@@ -82,10 +82,69 @@ fn build_writes_all_4_sqlite_stores() {
     // No assertion on count — TS fixture may have no resolvable intra-repo imports
     // depending on file layout. The important thing is the table exists.
 
-    // Sanity: search.db has chunks (chunker ran on source files)
-    let conn4 = Connection::open(dir.join("search.db")).unwrap();
-    let chunks: i64 = conn4
+    // Sanity: search.db has chunks (chunker ran on source files).
+    // Use SearchStore::open so the sqlite-vec extension is registered on
+    // this connection — bare Connection::open won't see chunk_vec.
+    let store4 = repolayer::search::store::SearchStore::open(&dir.join("search.db")).unwrap();
+    let chunks: i64 = store4
+        .conn()
         .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
         .unwrap();
     assert!(chunks >= 1, "expected ≥1 chunk in search.db, got {}", chunks);
+
+    // chunk_vec virtual table must exist
+    let vec_table_count: i64 = store4
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name = 'chunk_vec'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        vec_table_count, 1,
+        "chunk_vec virtual table missing"
+    );
+
+    // Default behaviour: REPOLAYER_DOWNLOAD not set → no embeddings written.
+    assert_eq!(
+        store4.embedding_count().unwrap(),
+        0,
+        "expected 0 embeddings without REPOLAYER_DOWNLOAD=1"
+    );
+}
+
+/// When the user has explicitly opted out via REPOLAYER_NO_DOWNLOAD AND has no
+/// cache, the build must succeed without trying to fetch the model.
+#[test]
+fn build_with_no_download_succeeds() {
+    let workspace = tempdir().unwrap();
+    let src_repo = std::path::Path::new("tests/fixtures/single_repo_ts");
+    let dst_repo = workspace.path().join("repo");
+    copy_dir_all(src_repo, &dst_repo).unwrap();
+    fs::write(
+        workspace.path().join("repolayer.yml"),
+        format!("repos:\n  - path: {}\n", dst_repo.display()),
+    )
+    .unwrap();
+
+    // Point AST_OUTLINE_MODEL_DIR somewhere known-empty so we can be sure
+    // there's no pre-existing cache satisfying the download check.
+    let empty_cache = workspace.path().join("empty-cache");
+    fs::create_dir_all(&empty_cache).unwrap();
+
+    Command::cargo_bin("repolayer")
+        .unwrap()
+        .current_dir(workspace.path())
+        .env("REPOLAYER_NO_DOWNLOAD", "1")
+        .env("AST_OUTLINE_MODEL_DIR", &empty_cache)
+        .arg("build")
+        .assert()
+        .success();
+
+    // Embeddings must still be empty.
+    let store =
+        repolayer::search::store::SearchStore::open(&workspace.path().join(".repolayer/search.db"))
+            .unwrap();
+    assert_eq!(store.embedding_count().unwrap(), 0);
 }

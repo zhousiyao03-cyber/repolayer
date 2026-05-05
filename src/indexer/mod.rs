@@ -113,6 +113,21 @@ impl Indexer {
         let idl_edges = linker.link_all()?;
         stats.edges += idl_edges;
 
+        // imports_to_repo: high-confidence Imports edges from real Go module
+        // imports (deps.db.external_imports → matching workspace repo).
+        match crate::linker::imports_to_repo::link(
+            &self.store,
+            &self.deps_store,
+            &self.workspace_root,
+            &self.config,
+        ) {
+            Ok(n) => {
+                info!("imports_to_repo: {} cross-repo Imports edges", n);
+                stats.edges += n;
+            }
+            Err(e) => warn!("imports_to_repo failed: {}", e),
+        }
+
         // Manual links from repolayer.yml
         let manual_edges = crate::linker::manual::apply_manual_links(&self.store, &self.config)?;
         stats.edges += manual_edges;

@@ -159,6 +159,24 @@ impl DepStore {
         Ok(g)
     }
 
+    /// Return every external_imports row as (repo, from_path, raw).
+    /// Used by the import-based cross-repo linker.
+    pub fn list_external_imports(&self) -> Result<Vec<(String, String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT repo, from_path, raw FROM external_imports")?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
     pub fn delete_file(&self, repo: &str, path: &str) -> Result<()> {
         self.conn.execute(
             "DELETE FROM forward_edges WHERE repo = ?1 AND from_path = ?2",

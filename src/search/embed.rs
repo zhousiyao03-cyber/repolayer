@@ -21,6 +21,21 @@ use tokenizers::Tokenizer;
 /// stack-allocate result buffers.
 pub const DIM: usize = 256;
 
+/// Best-effort: encode a query string using the cached potion-code-16M
+/// model. Returns `None` when the model isn't on disk (so callers can
+/// fall back to BM25-only search). Never triggers a download.
+pub fn try_encode_query(query: &str) -> Option<Vec<f32>> {
+    use crate::search::download::{model_dir, ModelInfo};
+
+    let info = ModelInfo::potion_code_16m();
+    let dir = model_dir(&info).ok()?;
+    if !dir.join("model.safetensors").is_file() || !dir.join("tokenizer.json").is_file() {
+        return None;
+    }
+    let embedder = Embedder::open(&dir).ok()?;
+    Some(embedder.encode_one(query).to_vec())
+}
+
 /// Tensor name inside `model.safetensors`. model2vec's convention.
 const EMBEDDINGS_TENSOR: &str = "embeddings";
 

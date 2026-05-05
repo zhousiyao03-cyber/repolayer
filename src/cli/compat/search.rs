@@ -1,10 +1,10 @@
-//! `repolayer search` — hybrid BM25 + substring search across the workspace.
+//! `repolayer search` — hybrid BM25 + dense embedding search.
 //!
-//! Plan C MVP uses a SQLite substring fallback (`SearchStore::search_substring`).
-//! The full BM25+dense path is available via `Index::search` in
-//! `src/search/index.rs` but requires the embedding model to be cached on disk;
-//! that path is used automatically when the `.ast-outline/index/` cache exists
-//! (wired in a later iteration).
+//! Builds an in-memory BM25 index over all chunks on every call (postings
+//! aren't persisted; ms-level work even on workspaces with thousands of
+//! chunks). If the embedding model is cached locally and `chunk_vec` has
+//! rows, also runs a dense kNN against the query embedding and fuses with
+//! RRF. Falls back to substring matching when both paths produce no hits.
 
 use anyhow::Result;
 
@@ -19,7 +19,12 @@ pub async fn run(query: String, k: usize, json: bool) -> Result<()> {
     }
 
     let store = crate::search::store::SearchStore::open(&db)?;
-    let hits = store.search_substring(&query, k)?;
+
+    // Try to encode the query with the cached embedding model. If the model
+    // isn't there, we silently degrade to BM25-only.
+    let qv = crate::search::embed::try_encode_query(&query);
+
+    let hits = store.search_hybrid(&query, k, qv.as_deref(), None)?;
 
     if json {
         let entries: Vec<serde_json::Value> = hits
@@ -32,22 +37,21 @@ pub async fn run(query: String, k: usize, json: bool) -> Result<()> {
             "hits": entries,
         });
         println!("{}", serde_json::to_string_pretty(&envelope)?);
+    } else if hits.is_empty() {
+        eprintln!("no results for '{}'", query);
     } else {
-        if hits.is_empty() {
-            eprintln!("no results for '{}'", query);
-        } else {
-            for (i, hit) in hits.iter().enumerate() {
-                println!(
-                    "[{}] {}:{}-{} (repo: {}, score: {:.2})",
-                    i + 1,
-                    hit.path,
-                    hit.start_line,
-                    hit.end_line,
-                    hit.repo,
-                    hit.score,
-                );
-            }
+        for (i, hit) in hits.iter().enumerate() {
+            println!(
+                "[{}] {}:{}-{} (repo: {}, score: {:.4})",
+                i + 1,
+                hit.path,
+                hit.start_line,
+                hit.end_line,
+                hit.repo,
+                hit.score,
+            );
         }
     }
     Ok(())
 }
+

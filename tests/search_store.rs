@@ -142,3 +142,69 @@ fn knn_search_dim_check() {
     let err = s.knn_search(&bad, 1).unwrap_err();
     assert!(err.to_string().contains("256"), "{}", err);
 }
+
+#[test]
+fn hybrid_bm25_only_finds_keyword_match() {
+    // No embeddings at all → search_hybrid should still rank chunks by BM25.
+    let dir = tempdir().unwrap();
+    let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
+    s.replace_repo_chunks(
+        "r",
+        &[
+            make_chunk("a.rs", 1, "fn authenticate(user: &str) -> bool { true }"),
+            make_chunk("b.rs", 1, "fn render_template(ctx: &Ctx) -> String { String::new() }"),
+            make_chunk("c.rs", 1, "fn parse_yaml(input: &str) -> Value { todo!() }"),
+        ],
+    )
+    .unwrap();
+
+    let hits = s.search_hybrid("authenticate", 5, None, None).unwrap();
+    assert!(!hits.is_empty(), "expected BM25-only path to return matches");
+    assert_eq!(hits[0].path, "a.rs", "best match should be a.rs");
+}
+
+#[test]
+fn hybrid_substring_fallback_when_no_signal() {
+    // BM25 will produce no hits because none of the chunk content tokens
+    // overlap the query; substring fallback should still try.
+    let dir = tempdir().unwrap();
+    let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
+    s.replace_repo_chunks(
+        "r",
+        &[make_chunk("a.rs", 1, "Bizarre needle inside markup_block_42")],
+    )
+    .unwrap();
+
+    let hits = s.search_hybrid("markup_block_42", 5, None, None).unwrap();
+    // Should match either via BM25 (single token) or substring fallback;
+    // either path returns a hit.
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].path, "a.rs");
+}
+
+#[test]
+fn hybrid_with_query_embedding_uses_dense_signal() {
+    // Build chunks, attach embeddings that point chunk 1 at the query.
+    let dir = tempdir().unwrap();
+    let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
+    s.replace_repo_chunks(
+        "r",
+        &[
+            make_chunk("a.rs", 1, "alpha"),
+            make_chunk("b.rs", 1, "beta gamma delta"),
+        ],
+    )
+    .unwrap();
+    // chunk_id 1 is the closest semantic neighbour to the query vector.
+    s.upsert_embedding(1, &unit_vec(0)).unwrap();
+    s.upsert_embedding(2, &unit_vec(100)).unwrap();
+
+    // Query string "delta" makes BM25 prefer chunk 2; query embedding
+    // unit_vec(0) makes dense prefer chunk 1. With alpha=0.5 RRF will
+    // tie them, but both should be in the result set.
+    let qv = unit_vec(0);
+    let hits = s.search_hybrid("delta", 5, Some(&qv), Some(0.5)).unwrap();
+    let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
+    assert!(ids.contains(&1), "expected dense-favoured chunk 1 in {ids:?}");
+    assert!(ids.contains(&2), "expected BM25-favoured chunk 2 in {ids:?}");
+}

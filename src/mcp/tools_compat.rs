@@ -472,7 +472,8 @@ impl Tools {
         }
 
         let store = crate::search::store::SearchStore::open(&db)?;
-        let hits = store.search_substring(&args.query, args.k)?;
+        let qv = crate::search::embed::try_encode_query(&args.query);
+        let hits = store.search_hybrid(&args.query, args.k, qv.as_deref(), None)?;
 
         if args.json {
             let entries: Vec<Value> = hits
@@ -566,7 +567,8 @@ impl Tools {
             .collect::<Vec<_>>()
             .join(" ");
 
-        let mut hits = store.search_substring(&query, args.k + 1)?;
+        let qv = crate::search::embed::try_encode_query(&target_content);
+        let mut hits = store.search_hybrid(&query, args.k + 1, qv.as_deref(), None)?;
         hits.retain(|h| h.path != path_str && h.path != rel_str && h.path != stored_path);
         hits.truncate(args.k);
 
@@ -612,3 +614,4 @@ impl Tools {
         }))
     }
 }
+

@@ -330,36 +330,41 @@ impl Indexer {
         self.store.upsert_node(&repo_node)?;
         stats.nodes += 1;
 
-        for entry in WalkBuilder::new(root).build() {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
-                continue;
-            }
-            let path = entry.path();
-            let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-            let rel = rel_path_str(path.strip_prefix(root).unwrap_or(path));
+        // Collect all .proto / .thrift paths first; the walk itself is cheap.
+        let entries: Vec<PathBuf> = WalkBuilder::new(root)
+            .build()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path().to_path_buf())
+            .filter(|p| {
+                let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+                ext == "proto" || ext == "thrift"
+            })
+            .collect();
 
-            let idl = match ext {
-                "proto" => match proto_p.parse(path) {
-                    Ok(i) => i,
+        // Parallel parse (regex-based, no shared mutable state in parsers).
+        let parsed: Vec<(PathBuf, crate::adapters::idl::protobuf::IdlFile)> = entries
+            .par_iter()
+            .filter_map(|p| {
+                let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+                let result = match ext {
+                    "proto" => proto_p.parse(p),
+                    "thrift" => thrift_p.parse(p),
+                    _ => return None,
+                };
+                match result {
+                    Ok(i) => Some((p.clone(), i)),
                     Err(e) => {
-                        warn!("skip {}: {}", path.display(), e);
-                        continue;
+                        warn!("skip {}: {}", p.display(), e);
+                        None
                     }
-                },
-                "thrift" => match thrift_p.parse(path) {
-                    Ok(i) => i,
-                    Err(e) => {
-                        warn!("skip {}: {}", path.display(), e);
-                        continue;
-                    }
-                },
-                _ => continue,
-            };
+                }
+            })
+            .collect();
 
+        // Serial write — single SQLite connection, no concurrent writes needed.
+        for (path, idl) in parsed {
+            let rel = rel_path_str(path.strip_prefix(root).unwrap_or(&path));
             for svc in &idl.services {
                 let svc_node = Node::new(NodeKind::IdlService, repo, &rel, Some(&svc.name));
                 self.store.upsert_node(&svc_node)?;

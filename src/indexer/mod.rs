@@ -162,6 +162,15 @@ impl Indexer {
             }
         }
 
+        // Replace emit-counts with authoritative DB counts.
+        // upsert_{node,edge} are idempotent, so the running counters above
+        // overcount whenever the same id is written more than once (e.g.
+        // a target Module first synthesized by an Imports edge and then
+        // re-walked as a real source file). Reading from SQLite at the end
+        // gives the user the true graph size.
+        stats.nodes = self.store.count_nodes()? as u64;
+        stats.edges = self.store.count_edges()? as u64;
+
         Ok(stats)
     }
 

@@ -118,6 +118,12 @@ impl Store {
             .query_row("SELECT COUNT(*) FROM nodes", [], |r| r.get(0))?)
     }
 
+    pub fn count_edges(&self) -> Result<i64> {
+        Ok(self
+            .conn
+            .query_row("SELECT COUNT(*) FROM edges", [], |r| r.get(0))?)
+    }
+
     pub fn upsert_node(&self, n: &Node) -> Result<()> {
         let kind_str = kind_to_db(n.kind)?;
         self.conn.execute(

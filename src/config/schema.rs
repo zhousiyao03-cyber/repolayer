@@ -15,6 +15,14 @@ pub struct RepoConfig {
     #[serde(default)]
     pub r#type: Option<RepoType>,
     pub name: Option<String>,
+    /// Go / external module path prefixes that map to this repo, used by
+    /// the import-based cross-repo linker. If absent, the linker auto-reads
+    /// the module path from this repo's `go.mod` for Go projects. IDL repos
+    /// (proto/thrift) typically have a separately-generated Go SDK repo and
+    /// should declare its module path explicitly here, e.g.
+    /// `["code.byted.org/oec/http_idl_gen"]` for an `http_idl` source repo.
+    #[serde(default)]
+    pub module_aliases: Vec<String>,
 }
 
 impl RepoConfig {

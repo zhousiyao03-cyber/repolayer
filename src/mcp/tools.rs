@@ -1,5 +1,6 @@
 use crate::graph::store::Store;
 use crate::query;
+use crate::search::store::SearchStore;
 use anyhow::Result;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -63,15 +64,25 @@ fn default_true() -> bool {
 /// The store is wrapped in `Arc<Mutex<Store>>` because `rusqlite::Connection`
 /// is `Send` but `!Sync`; the mutex serialises all query access so `Tools`
 /// itself becomes `Send + Sync`, satisfying `rmcp::ServerHandler`.
+///
+/// `search_store` is `None` when search.db isn't present yet (e.g. legacy
+/// builds from before the search subsystem). find_context degrades to its
+/// substring lane in that case.
 pub struct Tools {
     pub store: Arc<Mutex<Store>>,
+    pub search_store: Option<Arc<Mutex<SearchStore>>>,
 }
 
 impl Tools {
     pub fn find_context(&self, args: FindContextArgs) -> Result<Value> {
         let store = self.store.lock().expect("store mutex poisoned");
+        let search_guard = self
+            .search_store
+            .as_ref()
+            .map(|s| s.lock().expect("search_store mutex poisoned"));
         let result = query::find_context::find_context(
             &store,
+            search_guard.as_deref(),
             &args.task_description,
             args.budget_tokens.unwrap_or(5000),
         )?;

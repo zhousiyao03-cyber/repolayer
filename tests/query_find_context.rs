@@ -1,6 +1,8 @@
 use repolayer::graph::model::*;
 use repolayer::graph::store::Store;
 use repolayer::query::find_context::find_context;
+use repolayer::search::chunker::Chunk;
+use repolayer::search::store::SearchStore;
 use tempfile::tempdir;
 
 #[test]
@@ -18,7 +20,7 @@ fn find_context_returns_relevant_symbols() {
         store.upsert_node(&n).unwrap();
     }
 
-    let result = find_context(&store, "redeem benefit", 5000).unwrap();
+    let result = find_context(&store, None, "redeem benefit", 5000).unwrap();
     let symbols: Vec<_> = result
         .items
         .iter()
@@ -45,7 +47,7 @@ fn find_context_respects_token_budget() {
         );
         store.upsert_node(&n).unwrap();
     }
-    let result = find_context(&store, "test", 200).unwrap();
+    let result = find_context(&store, None, "test", 200).unwrap();
     // 200 token budget at 80 tokens/item should fit ~2 items
     assert!(
         result.items.len() <= 3,
@@ -63,7 +65,7 @@ fn find_context_respects_token_budget() {
 fn find_context_returns_helpful_suggestion_when_empty() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
-    let result = find_context(&store, "nothing matches xyzabc", 5000).unwrap();
+    let result = find_context(&store, None, "nothing matches xyzabc", 5000).unwrap();
     assert!(result.items.is_empty());
     assert!(
         result.suggestion.contains("No matches") || result.suggestion.contains("no matches"),
@@ -79,7 +81,7 @@ fn find_context_dedups_by_node_id() {
     // Single node that contains both query tokens
     let n = Node::new(NodeKind::Function, "r", "src/auth.ts", Some("login_user"));
     store.upsert_node(&n).unwrap();
-    let result = find_context(&store, "login user", 5000).unwrap();
+    let result = find_context(&store, None, "login user", 5000).unwrap();
     assert_eq!(
         result.items.len(),
         1,
@@ -96,7 +98,7 @@ fn find_context_has_schema_version() {
     let store = Store::open(&dir.path().join("index.db")).unwrap();
     let n = Node::new(NodeKind::Function, "r", "src/foo.ts", Some("foo"));
     store.upsert_node(&n).unwrap();
-    let result = find_context(&store, "foo", 5000).unwrap();
+    let result = find_context(&store, None, "foo", 5000).unwrap();
     assert_eq!(
         result.schema_version, "repolayer.find_context.v1",
         "schema_version must be stable"
@@ -109,7 +111,7 @@ fn find_context_items_have_match_source_and_confidence() {
     let store = Store::open(&dir.path().join("index.db")).unwrap();
     let n = Node::new(NodeKind::Function, "r", "src/auth.ts", Some("authenticateUser"));
     store.upsert_node(&n).unwrap();
-    let result = find_context(&store, "authenticate user", 5000).unwrap();
+    let result = find_context(&store, None, "authenticate user", 5000).unwrap();
     assert!(!result.items.is_empty(), "should have at least one result");
     let item = &result.items[0];
     assert_eq!(item.match_source, "substring", "substring is the only active path");
@@ -127,7 +129,7 @@ fn find_context_cross_repo_edges_empty_when_no_cross_edges() {
     // Single isolated node, no edges
     let n = Node::new(NodeKind::Function, "repo_a", "src/handler.ts", Some("handleRequest"));
     store.upsert_node(&n).unwrap();
-    let result = find_context(&store, "handle request", 5000).unwrap();
+    let result = find_context(&store, None, "handle request", 5000).unwrap();
     assert!(!result.items.is_empty());
     assert!(
         result.items[0].cross_repo_edges.is_empty(),
@@ -155,7 +157,7 @@ fn find_context_cross_repo_edges_populated_for_cross_repo_imports() {
     };
     store.upsert_edge(&edge).unwrap();
 
-    let result = find_context(&store, "clientFetch", 5000).unwrap();
+    let result = find_context(&store, None, "clientFetch", 5000).unwrap();
     let item = result
         .items
         .iter()
@@ -192,7 +194,7 @@ fn find_context_same_repo_edges_not_in_cross_repo() {
     };
     store.upsert_edge(&edge).unwrap();
 
-    let result = find_context(&store, "intraFunc", 5000).unwrap();
+    let result = find_context(&store, None, "intraFunc", 5000).unwrap();
     // Cross-repo edges list should be empty because both nodes are in repo_a
     for item in &result.items {
         if item.repo == "repo_a" {
@@ -203,4 +205,82 @@ fn find_context_same_repo_edges_not_in_cross_repo() {
             );
         }
     }
+}
+
+/// When the SearchStore lane surfaces a chunk whose symbol the substring lane
+/// can't find (different vocabulary), find_context should still return the
+/// underlying graph node and label it `match_source = "search"`.
+#[test]
+fn find_context_uses_search_lane_for_synonym_matches() {
+    let dir = tempdir().unwrap();
+    let store = Store::open(&dir.path().join("index.db")).unwrap();
+
+    // The graph has a function whose symbol is "handleHttpRequest" but which
+    // serves as the project's "authentication" entry point. A user querying
+    // for "user authentication" wouldn't hit it via substring but BM25 over
+    // the chunk content (which mentions auth) will.
+    let module = Node::new(NodeKind::Module, "repo_a", "src/server.ts", None);
+    let mut handler = Node::new(
+        NodeKind::Function,
+        "repo_a",
+        "src/server.ts",
+        Some("handleHttpRequest"),
+    );
+    handler.loc_start = Some(10);
+    handler.loc_end = Some(40);
+    store.upsert_node(&module).unwrap();
+    store.upsert_node(&handler).unwrap();
+
+    let search_store = SearchStore::open(&dir.path().join("search.db")).unwrap();
+    let chunk = Chunk {
+        content:
+            "function handleHttpRequest(req) { authenticate(req); validateUser(req.user); }"
+                .to_string(),
+        file_path: "src/server.ts".to_string(),
+        start_line: 10,
+        end_line: 20,
+        start_byte: 0,
+        end_byte: 80,
+        language: "typescript".to_string(),
+    };
+    search_store
+        .insert_file_chunks("repo_a", &[chunk])
+        .unwrap();
+
+    let result =
+        find_context(&store, Some(&search_store), "user authentication", 5000).unwrap();
+    let found = result
+        .items
+        .iter()
+        .find(|i| i.symbol.as_deref() == Some("handleHttpRequest"));
+    assert!(
+        found.is_some(),
+        "search lane should lift handleHttpRequest via BM25 hit on 'authenticate'; got items: {:?}",
+        result
+            .items
+            .iter()
+            .map(|i| (i.symbol.clone(), i.match_source))
+            .collect::<Vec<_>>()
+    );
+    let item = found.unwrap();
+    // Substring lane couldn't have found it (no token "user"/"authentication"
+    // in the symbol or path) so source must be "search", not "fusion".
+    assert_eq!(
+        item.match_source, "search",
+        "expected match_source=search since substring lane doesn't match"
+    );
+}
+
+/// With no SearchStore wired in, find_context must still work via the
+/// substring lane alone — proves the optional argument really is optional.
+#[test]
+fn find_context_without_search_store_is_substring_only() {
+    let dir = tempdir().unwrap();
+    let store = Store::open(&dir.path().join("index.db")).unwrap();
+    let n = Node::new(NodeKind::Function, "r", "src/a.ts", Some("alphaThing"));
+    store.upsert_node(&n).unwrap();
+
+    let result = find_context(&store, None, "alphaThing", 5000).unwrap();
+    assert_eq!(result.items.len(), 1);
+    assert_eq!(result.items[0].match_source, "substring");
 }

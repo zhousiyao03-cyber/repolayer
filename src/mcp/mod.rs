@@ -2,6 +2,7 @@ pub mod tools;
 pub mod tools_compat;
 
 use crate::graph::store::Store;
+use crate::search::store::SearchStore;
 use anyhow::Result;
 use rmcp::{
     handler::server::wrapper::Parameters,
@@ -24,9 +25,12 @@ pub struct RepolayerServer {
 }
 
 impl RepolayerServer {
-    fn new(store: Arc<Mutex<Store>>) -> Self {
+    fn new(store: Arc<Mutex<Store>>, search_store: Option<Arc<Mutex<SearchStore>>>) -> Self {
         Self {
-            tools: Arc::new(Tools { store }),
+            tools: Arc::new(Tools {
+                store,
+                search_store,
+            }),
         }
     }
 }
@@ -199,8 +203,11 @@ impl rmcp::ServerHandler for RepolayerServer {
     }
 }
 
-pub async fn run_stdio(store: Arc<Mutex<Store>>) -> Result<()> {
-    let server = RepolayerServer::new(store);
+pub async fn run_stdio(
+    store: Arc<Mutex<Store>>,
+    search_store: Option<Arc<Mutex<SearchStore>>>,
+) -> Result<()> {
+    let server = RepolayerServer::new(store, search_store);
     let service = server.serve(stdio()).await?;
     service.waiting().await?;
     Ok(())

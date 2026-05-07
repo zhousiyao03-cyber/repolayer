@@ -288,6 +288,19 @@ impl Store {
         }
     }
 
+    /// Return every node anchored at a specific (repo, path).
+    /// Used by find_context to map search-index hits back to graph nodes.
+    pub fn nodes_at_path(&self, repo: &str, path: &str) -> Result<Vec<Node>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
+             FROM nodes WHERE repo = ?1 AND path = ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![repo, path], row_to_node)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     pub fn search_symbols_substring(&self, q: &str, limit: usize) -> Result<Vec<Node>> {
         let escaped = q
             .replace('\\', "\\\\")

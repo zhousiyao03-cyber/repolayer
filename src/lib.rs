@@ -11,7 +11,6 @@ pub mod graph;
 pub mod indexer;
 pub mod linker;
 pub mod llm;
-pub mod mcp;
 pub mod query;
 
 // Re-export helpers used by surface/ language resolvers.

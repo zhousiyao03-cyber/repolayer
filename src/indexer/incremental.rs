@@ -2,7 +2,7 @@ use crate::config::Config;
 use crate::indexer::Indexer;
 use anyhow::Result;
 use git2::Repository;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
@@ -10,10 +10,10 @@ pub fn update(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Resu
     let mut indexer = Indexer::new(workspace_root.clone(), db_path, config.clone())?;
 
     // Identify changed files in each repo via git diff (working tree vs HEAD)
-    let mut changed: Vec<(String, PathBuf)> = Vec::new(); // (repo_name, abs_path)
+    // Group by repo so the per-repo passes below see all of that repo's changes at once.
+    let mut by_repo: HashMap<String, RepoChanges> = HashMap::new();
     for r in &config.repos {
         if r.is_idl() {
-            // For IDL, fall back to full re-index (rare in practice)
             continue;
         }
         let root = if r.path.is_absolute() {
@@ -42,8 +42,15 @@ pub fn update(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Resu
                     None,
                     None,
                 )?;
-                for p in paths {
-                    changed.push((repo_name.clone(), p));
+                if !paths.is_empty() {
+                    by_repo
+                        .entry(repo_name.clone())
+                        .or_insert_with(|| RepoChanges {
+                            root: root.clone(),
+                            files: Vec::new(),
+                        })
+                        .files
+                        .extend(paths);
                 }
             }
             Err(_) => {
@@ -52,82 +59,160 @@ pub fn update(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Resu
         }
     }
 
-    if changed.is_empty() {
+    let total_changed: usize = by_repo.values().map(|c| c.files.len()).sum();
+    if total_changed == 0 {
         println!("no changes detected");
         return Ok(());
     }
+    info!("re-indexing {} changed files", total_changed);
 
-    info!("re-indexing {} changed files", changed.len());
-
-    // Per-file reindex for index.db + outline.db (and per-file delete from deps/search)
-    for (repo_name, path) in &changed {
-        if let Err(e) = indexer.reindex_file(repo_name, path) {
-            warn!("reindex {} failed: {}", path.display(), e);
+    // Per-file reindex of index.db + outline.db (existing path).
+    for (repo_name, ch) in &by_repo {
+        for path in &ch.files {
+            if let Err(e) = indexer.reindex_file(repo_name, path) {
+                warn!("reindex {} failed: {}", path.display(), e);
+            }
         }
     }
 
-    // Collect all affected non-IDL repos for bulk deps + search rebuild
-    let affected_repos: HashSet<String> = changed
-        .iter()
-        .map(|(r, _)| r.clone())
-        .collect();
-
-    for repo_name in &affected_repos {
-        // Find the repo config entry (match by resolved name)
-        let cfg_repo = config.repos.iter().find(|r| {
-            let root = if r.path.is_absolute() {
-                r.path.clone()
-            } else {
-                workspace_root.join(&r.path)
-            };
-            let name = r.name.clone().unwrap_or_else(|| {
-                root.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_default()
-            });
-            name == *repo_name
-        });
-        let Some(rcfg) = cfg_repo else {
-            continue;
-        };
-        if rcfg.is_idl() {
-            continue; // IDL repos don't have deps/search graphs
-        }
-        let root = if rcfg.path.is_absolute() {
-            rcfg.path.clone()
-        } else {
-            workspace_root.join(&rcfg.path)
-        };
-
-        // Rebuild deps graph for the whole repo (correct but slow — TODO v0.2.1: per-file)
-        match crate::deps::build_for_repo(&root) {
-            Ok(graph) => {
-                if let Err(e) = indexer.deps_store.replace_repo_graph(repo_name, &graph) {
-                    warn!("deps replace failed for {}: {}", repo_name, e);
+    // Per-file deps + search refresh, one repo at a time so SuffixIndex is shared.
+    for (repo_name, ch) in &by_repo {
+        // ── deps: build only the changed files, reusing one SuffixIndex ──────
+        match crate::deps::build_for_files(&ch.root, &ch.files) {
+            Ok(results) => {
+                for r in results {
+                    let key = r.file.to_string_lossy();
+                    if let Err(e) = indexer.deps_store.upsert_file_edges(
+                        repo_name,
+                        key.as_ref(),
+                        &r.edges,
+                        &r.external,
+                    ) {
+                        warn!(
+                            "deps upsert_file_edges {} failed: {}",
+                            r.file.display(),
+                            e
+                        );
+                    }
+                }
+                // Files that were deleted from disk (or whose language is now
+                // unrecognised) won't show up in `results`. Wipe their rows
+                // explicitly so stale edges don't linger.
+                let resolved_keys: std::collections::HashSet<String> = ch
+                    .files
+                    .iter()
+                    .filter(|p| p.exists())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect();
+                for path in &ch.files {
+                    let key = path.to_string_lossy().into_owned();
+                    if !resolved_keys.contains(&key) {
+                        if let Err(e) = indexer.deps_store.delete_file(repo_name, &key) {
+                            warn!("deps delete_file {} failed: {}", path.display(), e);
+                        }
+                    }
                 }
             }
-            Err(e) => warn!("deps::build_for_repo({}) failed: {}", repo_name, e),
+            Err(e) => warn!("deps::build_for_files({}) failed: {}", repo_name, e),
         }
 
-        // Rebuild search chunks for the whole repo (correct but slow — TODO v0.2.1: per-file)
-        let outline_files = match indexer.outline_store.list_files(repo_name) {
-            Ok(f) => f,
-            Err(e) => {
-                warn!("outline_store.list_files({}) failed: {}", repo_name, e);
+        // ── search: re-chunk only the changed files. search.db stores chunk
+        // paths exactly as `Indexer::build_all` does — `repo_path.join(rel)`
+        // where `rel` is whatever ParseResult.path is (absolute, set by the
+        // adapters). Mirror that here so unchanged files keep their chunk
+        // ids stable across builds.
+        let mut new_chunk_ids: Vec<i64> = Vec::new();
+        for path in &ch.files {
+            let key = path.to_string_lossy();
+            if let Err(e) = indexer.search_store.delete_file(repo_name, key.as_ref()) {
+                warn!("search delete_file {} failed: {}", path.display(), e);
                 continue;
             }
-        };
-        let mut all_chunks = Vec::new();
-        for (_, rel) in &outline_files {
-            let abs = root.join(rel);
-            let chunks = crate::search::chunker::chunk_file(&abs, rel);
-            all_chunks.extend(chunks);
+            if !path.exists() {
+                continue;
+            }
+            let chunks = crate::search::chunker::chunk_file(path, key.as_ref());
+            match indexer.search_store.insert_file_chunks(repo_name, &chunks) {
+                Ok(ids) => new_chunk_ids.extend(ids),
+                Err(e) => warn!("search insert_file_chunks {} failed: {}", path.display(), e),
+            }
         }
-        if let Err(e) = indexer.search_store.replace_repo_chunks(repo_name, &all_chunks) {
-            warn!("search_store write failed for {}: {}", repo_name, e);
+
+        // ── search: refresh embeddings for the new chunks if the model is
+        // already cached. Mirrors the cache-only policy in the build path —
+        // we never download here, since `update` should be cheap.
+        if !new_chunk_ids.is_empty() {
+            if let Err(e) = embed_chunks_if_cached(&indexer.search_store, &new_chunk_ids) {
+                warn!("incremental embedding failed (continuing): {}", e);
+            }
         }
     }
 
-    println!("updated {} files", changed.len());
+    println!("updated {} files", total_changed);
+    Ok(())
+}
+
+struct RepoChanges {
+    root: PathBuf,
+    files: Vec<PathBuf>,
+}
+
+/// Encode a set of chunk ids and write the resulting vectors to `chunk_vec`.
+/// Returns `Ok(())` and skips silently if the embedding model isn't already
+/// cached on disk — `update` should never block on a 64 MB download.
+fn embed_chunks_if_cached(
+    store: &crate::search::store::SearchStore,
+    ids: &[i64],
+) -> Result<()> {
+    use crate::search::download::{ensure_model, ModelInfo};
+    use crate::search::embed::Embedder;
+
+    // Cache-only check: same logic as cached_model_present() in indexer/mod.rs,
+    // but local so we don't have to pub it.
+    let env_dir = std::env::var("AST_OUTLINE_MODEL_DIR")
+        .ok()
+        .map(std::path::PathBuf::from);
+    let model_dir = match env_dir {
+        Some(d) => d,
+        None => match dirs::cache_dir() {
+            Some(c) => c.join("ast-outline").join("models").join("potion-code-16m"),
+            None => return Ok(()), // no cache dir; nothing we can do
+        },
+    };
+    let cached = model_dir.join("model.safetensors").is_file()
+        && model_dir.join("tokenizer.json").is_file()
+        && model_dir.join("manifest.json").is_file();
+    if !cached {
+        return Ok(()); // skip silently — search keeps working via BM25/substring
+    }
+
+    let info = ModelInfo::potion_code_16m();
+    let dir = ensure_model(&info)
+        .map_err(|e| anyhow::anyhow!("ensure_model failed: {}", e))?;
+    let embedder = Embedder::open(&dir)
+        .map_err(|e| anyhow::anyhow!("loading embedder: {}", e))?;
+
+    // Pull (id, content) for the ids we just inserted.
+    let placeholders: String = ids
+        .iter()
+        .enumerate()
+        .map(|(i, _)| format!("?{}", i + 1))
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT id, content FROM chunks WHERE id IN ({placeholders})"
+    );
+    let conn = store.conn();
+    let mut stmt = conn.prepare(&sql)?;
+    let params_dyn: Vec<&dyn rusqlite::ToSql> =
+        ids.iter().map(|i| i as &dyn rusqlite::ToSql).collect();
+    let rows = stmt.query_map(params_dyn.as_slice(), |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for r in rows {
+        let (id, content) = r?;
+        let v = embedder.encode_one(&content);
+        store.upsert_embedding(id, &v)?;
+    }
     Ok(())
 }

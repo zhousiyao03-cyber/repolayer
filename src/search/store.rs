@@ -264,12 +264,45 @@ impl SearchStore {
     }
 
     /// Delete all chunks for a specific file within a repo.
+    /// Drops the matching chunk_vec rows first so vec0 entries don't dangle.
     pub fn delete_file(&self, repo: &str, path: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM chunk_vec WHERE rowid IN \
+             (SELECT id FROM chunks WHERE repo = ?1 AND path = ?2)",
+            params![repo, path],
+        )?;
         self.conn.execute(
             "DELETE FROM chunks WHERE repo = ?1 AND path = ?2",
             params![repo, path],
         )?;
         Ok(())
+    }
+
+    /// Insert one file's chunks (no delete first — caller must have cleared
+    /// the existing chunks via `delete_file` if needed). Returns the rowid
+    /// for each inserted chunk in input order so the caller can write
+    /// embeddings.
+    pub fn insert_file_chunks(&self, repo: &str, chunks: &[Chunk]) -> Result<Vec<i64>> {
+        let mut ids = Vec::with_capacity(chunks.len());
+        for chunk in chunks {
+            let hash_bytes: Vec<u8> =
+                format!("{}-{}-{}", chunk.file_path, chunk.start_line, chunk.end_line)
+                    .into_bytes();
+            self.conn.execute(
+                "INSERT INTO chunks(repo, path, start_line, end_line, content, chunk_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    repo,
+                    chunk.file_path,
+                    chunk.start_line as i64,
+                    chunk.end_line as i64,
+                    chunk.content,
+                    hash_bytes,
+                ],
+            )?;
+            ids.push(self.conn.last_insert_rowid());
+        }
+        Ok(ids)
     }
 
     /// Borrow the underlying connection (read-only access for ad-hoc queries).

@@ -431,11 +431,12 @@ impl Indexer {
         };
         let rel = rel_path_str(rel_path);
 
-        // ── Delete from all 4 stores ─────────────────────────────────────────
+        // ── Delete from index.db + outline.db. deps.db and search.db are
+        // refreshed by the caller (incremental::update) using their own
+        // path conventions (abs for deps, rel for search), so we don't
+        // touch them here.
         self.store.delete_module(repo, &rel)?;
         self.outline_store.delete(repo, &rel)?;
-        self.deps_store.delete_file(repo, &rel)?;
-        self.search_store.delete_file(repo, &rel)?;
 
         // If file no longer exists (deleted), cleanup is done
         if !abs_path.exists() {

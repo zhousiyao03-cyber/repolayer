@@ -188,6 +188,50 @@ impl DepStore {
         )?;
         Ok(())
     }
+
+    /// Replace one file's forward edges + externals atomically.
+    /// `from_path` is the source file path stored as TEXT (caller normalizes).
+    /// `edges` are resolved internal targets; `externals` are unresolved
+    /// import specs (used by the cross-repo Imports linker).
+    pub fn upsert_file_edges(
+        &self,
+        repo: &str,
+        from_path: &str,
+        edges: &[DepEdge],
+        externals: &[String],
+    ) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM forward_edges WHERE repo = ?1 AND from_path = ?2",
+            params![repo, from_path],
+        )?;
+        self.conn.execute(
+            "DELETE FROM external_imports WHERE repo = ?1 AND from_path = ?2",
+            params![repo, from_path],
+        )?;
+        for e in edges {
+            let kind_str = import_kind_to_str(e.kind);
+            self.conn.execute(
+                "INSERT OR REPLACE INTO forward_edges(repo, from_path, to_path, edge_kind, line, local_name, raw_path)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![
+                    repo,
+                    from_path,
+                    e.target.to_string_lossy().as_ref(),
+                    kind_str,
+                    e.line as i64,
+                    e.local_name,
+                    e.raw_path,
+                ],
+            )?;
+        }
+        for raw in externals {
+            self.conn.execute(
+                "INSERT INTO external_imports(repo, from_path, raw) VALUES (?1, ?2, ?3)",
+                params![repo, from_path, raw],
+            )?;
+        }
+        Ok(())
+    }
 }
 
 /// Serialize `ImportKind` to a stable lowercase string tag.

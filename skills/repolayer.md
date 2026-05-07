@@ -97,6 +97,27 @@ repolayer 独有命令。给一个 IDL 方法名（protobuf rpc / thrift functio
 
 ---
 
+## 与 grep / find 的关系
+
+repolayer 不取代 `rg` / `grep` / `find` / `Read` —— 它们各有适用场景。下面是一些
+**事实层面**的等价关系，知道这些可以避免做重复劳动：
+
+| 想干的事 | 一条 repolayer 命令通常已经够 | 而不是 |
+|---|---|---|
+| 找一个符号 / 函数 / 方法在哪 | `repolayer query "GetXxx"` | `find . \| xargs grep "GetXxx"` |
+| 找包含某关键词的代码 | `repolayer search "<keyword>"` | `rg "<keyword>"` 全工作区 |
+| 一个 IDL 方法的实现 + 所有调用方 | `repolayer find-idl-impl "<method>"` | 在每个仓单独 grep 拼装 |
+| 看一个文件的结构 / 函数签名 | `repolayer outline <file>` | `cat <file>` 全文 |
+| 提取某个函数的源码 | `repolayer show <file> <symbol>` | `sed -n 'A,Bp' <file>` 估算行号 |
+
+`repolayer query` 默认已经匹配同一符号的多种命名变体（驼峰 / 蛇形 / 不同语言），
+所以**不需要对一个符号反复跑多次 grep 试不同写法**。
+
+如果 `repolayer search` / `query` 返回 0 条，再回退到 `rg` 字面找通常更靠谱
+（可能是符号在评论或字符串里、未被索引为 declaration）。
+
+---
+
 ## SQL escape hatch
 
 `.repolayer/index.db` 是一个普通 SQLite 库，可以直接 `sqlite3` 查。

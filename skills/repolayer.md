@@ -1,9 +1,12 @@
 ---
 name: repolayer
 description: |
-  跨仓代码索引 CLI。当工作区有 .repolayer/ 时，用它做精确符号查询、混合检索、
-  outline / 函数体提取、依赖图查询，比 grep / find / 整文件 Read 更快、token 更省，
-  且能识别跨仓 Imports / Calls / Implements 边。
+  跨仓代码索引 CLI。用户问"X 在哪定义""X 的全链路""谁调用了 X""谁实现了这个 IDL 方法"
+  "这个 service / RPC 对应哪段代码"等跨仓导航问题时，优先用它，比 grep / find / 整文件 Read
+  更快、token 更省，且能识别跨仓 Imports / Calls / Implements 边。也覆盖单仓的精确符号查询、
+  混合检索、outline / 函数体提取、依赖图查询。
+  环境变量 $REPOLAYER_INDEX 已指向集中索引目录（如 ~/repolayer_ttec/），
+  即使 cwd 下没有 .repolayer/ 也可直接调用。
 ---
 
 # repolayer

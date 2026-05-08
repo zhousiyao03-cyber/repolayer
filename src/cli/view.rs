@@ -27,11 +27,11 @@ const DEPS_HTML: &str = include_str!("../../assets/view/deps.html");
 const INDEX_HTML: &str = include_str!("../../assets/view/index.html");
 
 pub async fn run(out: PathBuf, repo_filter: Option<String>) -> Result<()> {
-    let workspace = std::env::current_dir()?;
+    let workspace = crate::cli::workspace::resolve_workspace()?;
     let repolayer_dir = workspace.join(".repolayer");
     if !repolayer_dir.join("index.db").exists() {
         bail!(
-            "no index found at {} — run `repolayer build` first",
+            "no index found at {} — run `repolayer build` first (or set $REPOLAYER_INDEX)",
             repolayer_dir.join("index.db").display()
         );
     }

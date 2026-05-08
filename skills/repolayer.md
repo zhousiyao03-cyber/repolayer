@@ -14,8 +14,13 @@ description: |
 
 二进制：`which repolayer`。
 
+**索引位置**：默认从当前 cwd 找 `.repolayer/`。如果设了环境变量 `REPOLAYER_INDEX=<dir>`，
+查询类命令（`query` / `search` / `find-related` / `view`）会改从该目录读索引——
+适合"在业务仓里编辑代码、但用集中式工作区做跨仓查询"的工作流。
+写索引的命令（`build` / `update` / `init`）始终绑定 cwd，避免误写。
+
 如果 `.repolayer/` 不存在或 `repolayer.yml` 没配置，所有查询命令会报
-"no index found" 并提示先 build。
+"no index found" 并提示先 build（或设 `$REPOLAYER_INDEX`）。
 
 ## 决策树（先读这个）
 

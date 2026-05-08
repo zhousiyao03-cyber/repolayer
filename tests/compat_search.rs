@@ -62,6 +62,42 @@ fn search_runs_after_build() {
 }
 
 #[test]
+fn search_uses_repolayer_index_env_when_cwd_has_no_index() {
+    // Simulates: agent cd's into a business repo (no .repolayer/) but
+    // REPOLAYER_INDEX points at the cross-repo workspace.
+    let workspace = make_workspace_with_build();
+    let unrelated_dir = tempdir().unwrap();
+    Command::cargo_bin("repolayer")
+        .unwrap()
+        .current_dir(unrelated_dir.path()) // no .repolayer/ here
+        .env("REPOLAYER_INDEX", workspace.path())
+        .arg("search")
+        .arg("authenticate")
+        .arg("--json")
+        .assert()
+        .success();
+}
+
+#[test]
+fn search_repolayer_index_env_pointing_nowhere_errors_clearly() {
+    let dir = tempdir().unwrap();
+    let output = Command::cargo_bin("repolayer")
+        .unwrap()
+        .current_dir(dir.path())
+        .env("REPOLAYER_INDEX", "/no/such/dir/repolayer_test_42")
+        .arg("search")
+        .arg("anything")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("REPOLAYER_INDEX"),
+        "stderr should explain the env var: {stderr}"
+    );
+}
+
+#[test]
 fn search_json_produces_valid_json() {
     let dir = make_workspace_with_build();
     let output = Command::cargo_bin("repolayer")

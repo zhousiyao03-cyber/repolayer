@@ -11,6 +11,7 @@
 //! Pass `--full-content` when you actually need the body inline.
 
 use crate::cli::repo_filter::require_repo;
+use crate::cli::workspace;
 use crate::search::store::SearchLane;
 use anyhow::Result;
 
@@ -23,11 +24,10 @@ pub async fn run(
     json: bool,
     full_content: bool,
 ) -> Result<()> {
-    let workspace = std::env::current_dir()?;
-    let db = workspace.join(".repolayer").join("search.db");
+    let db = workspace::store_path("search.db")?;
     if !db.exists() {
         anyhow::bail!(
-            "no search index found at {} — run `repolayer build` first",
+            "no search index found at {} — run `repolayer build` first (or set $REPOLAYER_INDEX)",
             db.display()
         );
     }

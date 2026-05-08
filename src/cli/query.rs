@@ -1,13 +1,13 @@
 use crate::cli::repo_filter::require_repo;
+use crate::cli::workspace;
 use crate::graph::store::Store;
 use anyhow::{bail, Result};
-use std::path::PathBuf;
 
 pub async fn run(text: String, repo: Option<String>, json: bool) -> Result<()> {
-    let db_path = PathBuf::from(".repolayer/index.db");
+    let db_path = workspace::store_path("index.db")?;
     if !db_path.exists() {
         bail!(
-            "no index found at {} — run `repolayer build` first",
+            "no index found at {} — run `repolayer build` first (or set $REPOLAYER_INDEX to a workspace that has one)",
             db_path.display()
         );
     }

@@ -10,6 +10,7 @@ pub mod query;
 pub mod repo_filter;
 pub mod update;
 pub mod view;
+pub mod workspace;
 
 #[derive(Subcommand)]
 pub enum Command {

@@ -18,11 +18,11 @@ pub async fn run(spec: String, k: usize, json: bool) -> Result<()> {
         None => (PathBuf::from(&spec), 0),
     };
 
-    let workspace = std::env::current_dir()?;
-    let db = workspace.join(".repolayer").join("search.db");
+    let db = crate::cli::workspace::store_path("search.db")?;
     if !db.exists() {
         anyhow::bail!(
-            "no search index found — run `repolayer build` first"
+            "no search index found at {} — run `repolayer build` first (or set $REPOLAYER_INDEX)",
+            db.display()
         );
     }
 

@@ -104,6 +104,52 @@ fn query_treats_underscore_as_literal_not_wildcard() {
 }
 
 #[test]
+fn query_includes_idl_method_and_service_nodes() {
+    // Regression: previous kind whitelist excluded `idlmethod` / `idlservice`,
+    // forcing the agent to grep IDL files separately when tracing an API
+    // endpoint. Verify the IDL fixture's service + method nodes show up.
+    let workspace = tempdir().unwrap();
+    let repo_src = std::path::Path::new("tests/fixtures/idl");
+    let repo_dst = workspace.path().join("idl");
+    copy_dir_all(repo_src, &repo_dst).unwrap();
+
+    fs::write(
+        workspace.path().join("repolayer.yml"),
+        format!(
+            "repos:\n  - {{ name: idl, path: {}, type: idl }}\n",
+            repo_dst.display()
+        ),
+    )
+    .unwrap();
+
+    Command::cargo_bin("repolayer")
+        .unwrap()
+        .current_dir(workspace.path())
+        .arg("build")
+        .assert()
+        .success();
+
+    let out = Command::cargo_bin("repolayer")
+        .unwrap()
+        .current_dir(workspace.path())
+        .args(["query", "GetBenefit", "--json"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let kinds: std::collections::HashSet<String> = v["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["kind"].as_str().map(|s| s.to_string()))
+        .collect();
+    assert!(
+        kinds.contains("idlmethod"),
+        "query should now surface idlmethod nodes; got kinds = {kinds:?}"
+    );
+}
+
+#[test]
 fn query_repo_filter_restricts_to_named_repo() {
     // Two repos with the same symbol; --repo must filter to one of them.
     let workspace = tempdir().unwrap();

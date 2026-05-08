@@ -26,10 +26,11 @@ description: |
 
 | 起点 | 用什么 |
 |---|---|
-| 我知道符号名（精确 / 子串） | `repolayer query "Name"` |
+| 我知道符号名（精确 / 子串），含 IDL method / service | `repolayer query "Name"` |
 | 同上但只想在某个仓里找 | `repolayer query "Name" --repo <name>` |
 | 我知道关键词或行为描述（不知道符号名） | `repolayer search "..."` |
 | 同上但只在某个仓里找 | `repolayer search "..." --repo <name>` |
+| 找一段 URL / API path / 字面字符串（如 `/api/v1/...`） | `repolayer search "/api/v1/..."` 然后再缩小 |
 | 我有一个文件，想看它的结构 | `repolayer outline <file>` |
 | 我有一个文件 + 符号，想看函数体 | `repolayer show <file> <symbol>` |
 | 我想看一个目录 / 包对外暴露什么 | `repolayer digest <dir>` 或 `repolayer surface <dir>` |
@@ -37,6 +38,17 @@ description: |
 | 我想知道谁 import 了 X 文件 | `repolayer reverse-deps <file>` |
 | 找跟 X:line 相似的代码块 | `repolayer find-related <file>:<line>` |
 | 工作区有 import 循环吗 | `repolayer cycles` |
+
+**追接口/IDL 全链路的标准动作**：
+
+```
+repolayer query "<MethodName>"   # 一次拿到：handler 多个仓 + IDL 定义（http_idl/rpc_idl）+ TS stubs + router
+repolayer outline <handler.go>   # 看主 handler 文件结构
+repolayer show <handler.go> <Method>  # 看主入口实现
+```
+
+**不要**为了找 IDL 定义专门 `find ... -name "*.proto" | xargs grep`——`query` 已经包含
+`idlmethod` / `idlservice` 节点，IDL 定义会和业务 handler 一起出现在结果里。
 
 **默认顺序**：先 `query` / `search` 定位 → 再 `outline` 看结构 → 再 `show` 取函数体。
 不要直接 `Read` 整个文件，除非已经用 outline / show 拿到上下文还不够。
@@ -52,8 +64,11 @@ description: |
 
 ### `repolayer query <text> [--repo <name>] [--json]`
 
-在 graph 里查 declaration（function / method / type / module）。
+在 graph 里查 declaration——含 type / method / function / **idlmethod / idlservice**。
 对 symbol 名和 path **同时**做子串匹配，返回 `repo \t path::symbol \t line`，最多 20 条。
+
+**IDL 也在结果里**：追接口全链路时，`query "GetXxx"` 一次能同时返回业务 handler、
+http_idl 的 proto rpc 定义、rpc_idl 的 thrift method 定义，不用专门 grep IDL 文件。
 
 `--repo <name>` 限制结果到指定仓（必须匹配 `repolayer.yml` 里的 name；
 拼错时报错并给最近建议）。多仓里同名符号太多时优先加 `--repo` 收敛。
@@ -139,11 +154,11 @@ repolayer 不取代 `rg` / `grep` / `find` / `Read`：
 
 | 想干的事 | 优先用 | 原因 |
 |---|---|---|
-| 找一个符号定义 | `repolayer query` | 已建索引，命中带 repo / kind |
-| 关键词或行为描述检索 | `repolayer search` | 混合排序、多仓 |
+| 找一个符号定义（含 IDL method / service） | `repolayer query` | 已建索引，含 IDL 节点 |
+| 关键词 / 行为描述 / API URL / 字面字符串 | `repolayer search` | chunk content 被索引，URL 能命中 |
 | 看文件结构 | `repolayer outline` | token 省 5-10 倍 |
 | 提取一个函数体 | `repolayer show` | AST 边界，不用估行号 |
-| 找文本字面量 / 注释 / 字符串 | `rg` | repolayer 只索引 declaration |
+| 找一行注释 / 一个 import 路径具体文本 | `rg` | 单行字面、search 的 chunk 太粗 |
 | 看一个具体大文件改没改 | `Read` + offset/limit | repolayer 不存全文 |
 
 **典型反模式**：
@@ -152,6 +167,8 @@ repolayer 不取代 `rg` / `grep` / `find` / `Read`：
 - ❌ 用 `search --full-content` 一次拉 10 个 chunk 全文 → ✅ 默认 preview 已够定位，需要再 `show`
 - ❌ `search "..."` 后用 jq 过滤到某仓 → ✅ 直接 `--repo <name>`，BM25 也会在仓内重新算 IDF
 - ❌ 同名符号在多仓里 `query` 后人肉挑 → ✅ `query "..." --repo <name>` 直接收敛
+- ❌ `find http_idl rpc_idl -name "*.proto" \| xargs grep "Method"` → ✅ `repolayer query "Method"` 一次拿到所有 IDL 定义 + 业务 handler
+- ❌ `grep -rn "/api/v1/foo"` 在 monorepo 里找前端调用方 → ✅ `repolayer search "/api/v1/foo"`，命中后再用 grep 收敛到具体文件
 
 如果 `query` / `search` 返回 0 条，再回退到 `rg` 字面查（可能符号在注释 / 字符串里、
 或文件未提交导致 git diff 没刷过来）。

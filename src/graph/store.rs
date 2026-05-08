@@ -313,6 +313,16 @@ impl Store {
         repo_filter: Option<&str>,
         limit: usize,
     ) -> Result<Vec<Node>> {
+        // kind whitelist for `query`: user-written declarations *plus* IDL
+        // service / method nodes. The latter were originally excluded so that
+        // common short IDL method names (e.g. `Get`, `List`, defined dozens
+        // of times across services) wouldn't crowd out business code matches.
+        // Reality from a real session trace: the user almost always has to
+        // grep IDL files anyway when tracing an API endpoint, so excluding
+        // IDL nodes saved ~3 noise rows but cost 5 separate grep round-trips.
+        // We now include them; agents that don't care can filter on `kind`.
+        const KIND_WHITELIST: &str =
+            "('type', 'method', 'function', 'symbol', 'idlmethod', 'idlservice')";
         let escaped = q
             .replace('\\', "\\\\")
             .replace('%', "\\%")
@@ -320,23 +330,25 @@ impl Store {
         let pattern = format!("%{}%", escaped);
         let rows: Vec<Node> = match repo_filter {
             None => {
-                let mut stmt = self.conn.prepare(
+                let sql = format!(
                     "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
-                     FROM nodes WHERE kind IN ('type', 'method', 'function', 'symbol')
+                     FROM nodes WHERE kind IN {KIND_WHITELIST}
                        AND (symbol LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\')
-                     LIMIT ?2",
-                )?;
+                     LIMIT ?2"
+                );
+                let mut stmt = self.conn.prepare(&sql)?;
                 let mapped = stmt.query_map(params![pattern, limit as i64], row_to_node)?;
                 mapped.collect::<Result<Vec<_>, _>>()?
             }
             Some(repo) => {
-                let mut stmt = self.conn.prepare(
+                let sql = format!(
                     "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
-                     FROM nodes WHERE kind IN ('type', 'method', 'function', 'symbol')
+                     FROM nodes WHERE kind IN {KIND_WHITELIST}
                        AND repo = ?1
                        AND (symbol LIKE ?2 ESCAPE '\\' OR path LIKE ?2 ESCAPE '\\')
-                     LIMIT ?3",
-                )?;
+                     LIMIT ?3"
+                );
+                let mut stmt = self.conn.prepare(&sql)?;
                 let mapped =
                     stmt.query_map(params![repo, pattern, limit as i64], row_to_node)?;
                 mapped.collect::<Result<Vec<_>, _>>()?

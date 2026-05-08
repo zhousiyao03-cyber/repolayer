@@ -22,7 +22,9 @@ description: |
 | 起点 | 用什么 |
 |---|---|
 | 我知道符号名（精确 / 子串） | `repolayer query "Name"` |
+| 同上但只想在某个仓里找 | `repolayer query "Name" --repo <name>` |
 | 我知道关键词或行为描述（不知道符号名） | `repolayer search "..."` |
+| 同上但只在某个仓里找 | `repolayer search "..." --repo <name>` |
 | 我有一个文件，想看它的结构 | `repolayer outline <file>` |
 | 我有一个文件 + 符号，想看函数体 | `repolayer show <file> <symbol>` |
 | 我想看一个目录 / 包对外暴露什么 | `repolayer digest <dir>` 或 `repolayer surface <dir>` |
@@ -33,6 +35,11 @@ description: |
 
 **默认顺序**：先 `query` / `search` 定位 → 再 `outline` 看结构 → 再 `show` 取函数体。
 不要直接 `Read` 整个文件，除非已经用 outline / show 拿到上下文还不够。
+
+**多仓时优先加 `--repo`**：在 ttec 这种 40+ 仓的工作区里，跨仓 BM25 噪声会把
+真正相关的本仓结果挤出 top-K。如果你已经知道答案在哪个仓，加 `--repo`
+能让 BM25 IDF 在该仓内重新计算，结果更贴合。仓名拼错时 CLI 会列 5 个最近候选，
+直接抓正确名重试即可。
 
 ---
 
@@ -138,6 +145,8 @@ repolayer 不取代 `rg` / `grep` / `find` / `Read`：
 - ❌ 用 `rg "FuncName"` 找符号定义 → ✅ 用 `query`
 - ❌ `Read` 整个 1000 行 handler.go → ✅ 先 `outline` 再 `show <file> <symbol>`
 - ❌ 用 `search --full-content` 一次拉 10 个 chunk 全文 → ✅ 默认 preview 已够定位，需要再 `show`
+- ❌ `search "..."` 后用 jq 过滤到某仓 → ✅ 直接 `--repo <name>`，BM25 也会在仓内重新算 IDF
+- ❌ 同名符号在多仓里 `query` 后人肉挑 → ✅ `query "..." --repo <name>` 直接收敛
 
 如果 `query` / `search` 返回 0 条，再回退到 `rg` 字面查（可能符号在注释 / 字符串里、
 或文件未提交导致 git diff 没刷过来）。
@@ -152,6 +161,7 @@ repolayer 不取代 `rg` / `grep` / `find` / `Read`：
 | `no .repolayer/ index found` | 同上（其他子命令的提示文案） |
 | `# no matches / # no results` | 索引里没匹配。优先按 stdout 提示降级 |
 | `no callers found for <path>` | reverse-deps 0 命中。可能是真没人调，也可能是该文件不在已索引仓里 |
+| `Error: unknown repo 'xxx'. Did you mean: a, b, c, ...` | `--repo` 拼错。从建议里抓正确名直接重试，**不要**回退 `rg` |
 | `# WARNING: N parse errors`（outline）| 解析失败，outline 部分缺，对应文件直接 `Read` 兜底 |
 
 `repolayer update` 增量刷（只重做 git diff 命中文件）；`repolayer build` 全量重建。

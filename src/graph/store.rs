@@ -162,6 +162,33 @@ impl Store {
         Ok(())
     }
 
+    /// Hydrate a batch of nodes by id in a single query. Returns a map from
+    /// id → Node; missing ids are silently absent. Replaces N+1 `get_node`
+    /// loops in callers like `find_context::collect_cross_repo_edges`.
+    pub fn get_nodes_by_ids(
+        &self,
+        ids: &[String],
+    ) -> Result<std::collections::HashMap<String, Node>> {
+        if ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        let placeholders: String = (1..=ids.len())
+            .map(|i| format!("?{}", i))
+            .collect::<Vec<_>>()
+            .join(",");
+        let sql = format!(
+            "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
+             FROM nodes WHERE id IN ({placeholders})"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let params_dyn: Vec<&dyn rusqlite::ToSql> =
+            ids.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+        let rows = stmt
+            .query_map(params_dyn.as_slice(), row_to_node)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(rows.into_iter().map(|n| (n.id.clone(), n)).collect())
+    }
+
     pub fn get_node(&self, id: &str) -> Result<Option<Node>> {
         let res = self.conn.query_row(
             "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated

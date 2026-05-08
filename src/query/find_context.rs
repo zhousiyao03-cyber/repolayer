@@ -267,23 +267,35 @@ fn pick_node_for_hit(store: &Store, hit: &SearchHit) -> Result<Option<Node>> {
 
 /// Collect edges from `node` that cross into a different repo.
 /// Only `Imports`, `Invokes`, and `Implements` edge kinds are surfaced.
+///
+/// Hydrates all candidate target nodes in a single `IN (...)` query rather
+/// than per-edge round trips — for a fully-stitched ttec result item this
+/// turns ~5 single-row lookups into one.
 fn collect_cross_repo_edges(store: &Store, node: &Node) -> Result<Vec<EdgeRef>> {
-    let edges = store.get_edges_from(&node.id)?;
+    let edges: Vec<_> = store
+        .get_edges_from(&node.id)?
+        .into_iter()
+        .filter(|e| {
+            matches!(
+                e.kind,
+                EdgeKind::Imports | EdgeKind::Invokes | EdgeKind::Implements
+            )
+        })
+        .collect();
+    if edges.is_empty() {
+        return Ok(Vec::new());
+    }
+    let target_ids: Vec<String> = edges.iter().map(|e| e.to.clone()).collect();
+    let targets = store.get_nodes_by_ids(&target_ids)?;
     let mut out = Vec::new();
     for edge in edges {
-        if !matches!(
-            edge.kind,
-            EdgeKind::Imports | EdgeKind::Invokes | EdgeKind::Implements
-        ) {
-            continue;
-        }
-        if let Some(target) = store.get_node(&edge.to)? {
+        if let Some(target) = targets.get(&edge.to) {
             if target.repo != node.repo {
                 out.push(EdgeRef {
                     kind: format!("{:?}", edge.kind),
-                    target_repo: target.repo,
-                    target_path: target.path,
-                    target_symbol: target.symbol,
+                    target_repo: target.repo.clone(),
+                    target_path: target.path.clone(),
+                    target_symbol: target.symbol.clone(),
                     confidence: edge.confidence,
                 });
             }

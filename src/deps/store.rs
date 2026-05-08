@@ -54,6 +54,7 @@ impl DepStore {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("opening deps.db at {}", path.display()))?;
+        crate::graph::store::apply_perf_pragmas(&conn)?;
         conn.execute_batch(SCHEMA_V1)?;
         conn.execute(
             "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', '1')",

@@ -82,6 +82,7 @@ impl SearchStore {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("opening search.db at {}", path.display()))?;
+        crate::graph::store::apply_perf_pragmas(&conn)?;
         conn.execute_batch(SCHEMA_V1)?;
         conn.execute_batch(SCHEMA_V2_VEC)?;
         conn.execute(

@@ -3,6 +3,22 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
+/// Apply read-leaning performance PRAGMAs to a freshly opened connection.
+///
+/// WAL keeps readers off the writer's lock; NORMAL fsync drops the per-write
+/// stall (durability still survives crashes — only power-loss can lose the
+/// last commit, which is fine for a derived index). 64 MB page cache + 256 MB
+/// mmap fits the four ~100 MB stores comfortably on a dev box and turns hot
+/// queries into pointer chases instead of pread syscalls.
+pub(crate) fn apply_perf_pragmas(conn: &Connection) -> Result<()> {
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "cache_size", -65536)?;
+    conn.pragma_update(None, "mmap_size", 268_435_456i64)?;
+    conn.pragma_update(None, "temp_store", "MEMORY")?;
+    Ok(())
+}
+
 /// Single-threaded handle to the SQLite-backed graph store.
 ///
 /// `rusqlite::Connection` is `Send` but `!Sync`, so this struct cannot be
@@ -95,6 +111,7 @@ impl Store {
         }
         let conn = Connection::open(path)
             .with_context(|| format!("opening sqlite at {}", path.display()))?;
+        apply_perf_pragmas(&conn)?;
         conn.execute_batch(SCHEMA_V2)?;
         conn.execute(
             "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', '2')",

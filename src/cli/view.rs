@@ -85,7 +85,7 @@ pub async fn run(out: PathBuf, repo_filter: Option<String>) -> Result<()> {
 
     let dep_stats = export_deps_graph(
         &repolayer_dir.join("deps.db"),
-        &data_dir.join("deps.json"),
+        &data_dir,
         repo_filter.as_deref(),
     )?;
     eprintln!(
@@ -495,7 +495,7 @@ fn export_main_graph(
     })
 }
 
-fn export_deps_graph(db: &Path, out: &Path, repo_filter: Option<&str>) -> Result<DepStats> {
+fn export_deps_graph(db: &Path, data_dir: &Path, repo_filter: Option<&str>) -> Result<DepStats> {
     let conn = Connection::open(db)?;
     let mut stmt = conn.prepare(
         "SELECT repo, from_path, to_path, edge_kind FROM forward_edges",
@@ -526,17 +526,59 @@ fn export_deps_graph(db: &Path, out: &Path, repo_filter: Option<&str>) -> Result
     }
 
     let mut stats = DepStats::default();
-    let mut json = serde_json::Map::new();
+    let deps_dir = data_dir.join("deps");
+    fs::create_dir_all(&deps_dir)?;
     for (repo, (files, edges)) in &per_repo {
+        // Group files by their parent directory so visually adjacent nodes
+        // come from the same folder. Each group lays out as an inner grid; the
+        // groups themselves go in an outer grid sorted by group size desc.
+        let mut by_dir: HashMap<String, Vec<String>> = HashMap::new();
+        for p in files {
+            let dir = Path::new(p)
+                .parent()
+                .map(|d| d.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            by_dir.entry(dir).or_default().push(p.clone());
+        }
+        let mut groups: Vec<(String, Vec<String>)> = by_dir.into_iter().collect();
+        groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(&b.0)));
+        for (_, paths) in groups.iter_mut() {
+            paths.sort();
+        }
+
+        // Outer grid for groups
+        let n_groups = groups.len().max(1);
+        let outer_cols = (n_groups as f32).sqrt().ceil() as usize;
+        let inner_pitch: f32 = 26.0;
+        // Estimate cell size by largest group so groups don't overlap.
+        let largest = groups.iter().map(|(_, v)| v.len()).max().unwrap_or(1);
+        let inner_cols_max = (largest as f32).sqrt().ceil() as usize;
+        let cell_w = inner_cols_max as f32 * inner_pitch + 80.0;
+        let cell_h = inner_cols_max as f32 * inner_pitch + 80.0;
+
+        let mut positions: HashMap<String, (f32, f32)> = HashMap::new();
+        for (gi, (_dir, paths)) in groups.iter().enumerate() {
+            let ox = (gi % outer_cols) as f32 * cell_w;
+            let oy = (gi / outer_cols) as f32 * cell_h;
+            let inner_cols = (paths.len() as f32).sqrt().ceil().max(1.0) as usize;
+            for (j, p) in paths.iter().enumerate() {
+                let ix = (j % inner_cols) as f32 * inner_pitch;
+                let iy = (j / inner_cols) as f32 * inner_pitch;
+                positions.insert(p.clone(), (ox + ix, oy + iy));
+            }
+        }
+
         let nodes: Vec<serde_json::Value> = files
             .iter()
             .map(|p| {
+                let (x, y) = positions.get(p).copied().unwrap_or((0.0, 0.0));
                 serde_json::json!({
                     "data": {
                         "id": p,
                         "label": Path::new(p).file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| p.clone()),
                         "path": p,
-                    }
+                    },
+                    "position": { "x": x, "y": y },
                 })
             })
             .collect();
@@ -557,14 +599,27 @@ fn export_deps_graph(db: &Path, out: &Path, repo_filter: Option<&str>) -> Result
         stats.nodes += nodes.len();
         stats.edges += edge_vals.len();
         stats.per_repo.insert(repo.clone(), (nodes.len(), edge_vals.len()));
-        json.insert(
-            repo.clone(),
-            serde_json::json!({ "nodes": nodes, "edges": edge_vals }),
-        );
+        let path = deps_dir.join(format!("{}.json", sanitize(repo)));
+        fs::write(
+            &path,
+            serde_json::to_string(&serde_json::json!({
+                "nodes": nodes, "edges": edge_vals,
+            }))?,
+        )?;
     }
     stats.repos = per_repo.len();
 
-    fs::write(out, serde_json::to_string(&json)?)?;
+    // Tiny manifest so deps.html can populate the repo dropdown without
+    // pulling all per-repo JSONs.
+    let manifest: Vec<serde_json::Value> = stats
+        .per_repo
+        .iter()
+        .map(|(r, (n, e))| serde_json::json!({ "repo": r, "files": n, "edges": e }))
+        .collect();
+    fs::write(
+        data_dir.join("deps_manifest.json"),
+        serde_json::to_string(&manifest)?,
+    )?;
     Ok(stats)
 }
 

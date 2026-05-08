@@ -18,7 +18,7 @@ fn make_workspace_with_build() -> tempfile::TempDir {
     .unwrap();
     fs::write(
         dir.path().join("repolayer.yml"),
-        "repos:\n  - path: ./\n",
+        "repos:\n  - { name: my_test_repo, path: ./ }\n",
     )
     .unwrap();
     fs::write(
@@ -125,6 +125,49 @@ fn search_no_match_exits_zero() {
         .arg("xyzzy_no_such_symbol_ever")
         .assert()
         .success();
+}
+
+#[test]
+fn search_repo_filter_passes_through() {
+    let dir = make_workspace_with_build();
+    let output = Command::cargo_bin("repolayer")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("search")
+        .arg("authenticate")
+        .arg("--repo")
+        .arg("my_test_repo")
+        .arg("--json")
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(v["repo_filter"], "my_test_repo");
+    let hits = v["hits"].as_array().unwrap();
+    assert!(!hits.is_empty(), "expected hits in my_test_repo");
+    for hit in hits {
+        assert_eq!(hit["repo"], "my_test_repo");
+    }
+}
+
+#[test]
+fn search_unknown_repo_errors_with_suggestion() {
+    let dir = make_workspace_with_build();
+    let output = Command::cargo_bin("repolayer")
+        .unwrap()
+        .current_dir(dir.path())
+        .arg("search")
+        .arg("authenticate")
+        .arg("--repo")
+        .arg("my_test_rep") // typo
+        .output()
+        .unwrap();
+    assert!(!output.status.success(), "should fail on unknown repo");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("my_test_repo"),
+        "stderr should suggest the correct name: {stderr}"
+    );
 }
 
 #[test]

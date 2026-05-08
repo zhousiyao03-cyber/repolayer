@@ -245,11 +245,21 @@ impl SearchStore {
     /// List every chunk across every repo. Returns
     /// `(id, repo, path, start_line, end_line, content)` rows. Used by
     /// `search_hybrid` so it can build an in-memory BM25 index.
+    ///
+    /// When `repo_filter` is Some, only chunks belonging to that repo are
+    /// returned. The BM25 index is then built solely over that subset, so
+    /// IDF weights reflect *the repo*, not the workspace — hits inside the
+    /// repo aren't penalised for being common across the whole workspace.
     pub fn list_all_chunks(&self) -> Result<Vec<ChunkRowWithRepo>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, repo, path, start_line, end_line, content FROM chunks ORDER BY id",
-        )?;
-        let rows = stmt.query_map([], |row| {
+        self.list_chunks_filtered(None)
+    }
+
+    /// Same as [`list_all_chunks`] but optionally restricted to a single repo.
+    pub fn list_chunks_filtered(
+        &self,
+        repo_filter: Option<&str>,
+    ) -> Result<Vec<ChunkRowWithRepo>> {
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<ChunkRowWithRepo> {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, String>(1)?,
@@ -258,8 +268,34 @@ impl SearchStore {
                 row.get::<_, i64>(4)? as u32,
                 row.get::<_, String>(5)?,
             ))
-        })?;
-        let v: Result<Vec<_>, _> = rows.collect();
+        };
+        let rows: rusqlite::Result<Vec<ChunkRowWithRepo>> = match repo_filter {
+            None => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, repo, path, start_line, end_line, content FROM chunks ORDER BY id",
+                )?;
+                let mapped = stmt.query_map([], map_row)?;
+                mapped.collect()
+            }
+            Some(repo) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, repo, path, start_line, end_line, content FROM chunks WHERE repo = ?1 ORDER BY id",
+                )?;
+                let mapped = stmt.query_map(params![repo], map_row)?;
+                mapped.collect()
+            }
+        };
+        Ok(rows?)
+    }
+
+    /// Distinct repo names recorded in the chunks table. Used to produce
+    /// agent-friendly "did-you-mean" hints when a `--repo` filter doesn't match.
+    pub fn list_repo_names(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT repo FROM chunks ORDER BY repo")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let v: rusqlite::Result<Vec<_>> = rows.collect();
         Ok(v?)
     }
 
@@ -332,15 +368,33 @@ impl SearchStore {
         query_embedding: Option<&[f32]>,
         alpha: Option<f32>,
     ) -> Result<(Vec<SearchHit>, SearchLane)> {
+        self.search_hybrid_filtered(query, k, query_embedding, alpha, None)
+    }
+
+    /// Same as [`search_hybrid`], but optionally restrict the corpus to a
+    /// single repo. The BM25 index is rebuilt over just that repo so its
+    /// IDF reflects the repo's own term distribution; the dense kNN pull
+    /// is over-fetched (~16×) and post-filtered, since vec0 has no native
+    /// per-repo predicate.
+    pub fn search_hybrid_filtered(
+        &self,
+        query: &str,
+        k: usize,
+        query_embedding: Option<&[f32]>,
+        alpha: Option<f32>,
+        repo_filter: Option<&str>,
+    ) -> Result<(Vec<SearchHit>, SearchLane)> {
         use crate::search::{bm25::Bm25Index, fusion, tokens::tokenize};
 
-        let all = self.list_all_chunks()?;
+        let all = self.list_chunks_filtered(repo_filter)?;
         if all.is_empty() {
             return Ok((Vec::new(), SearchLane::Empty));
         }
 
         // Map from chunk_id (vec0 rowid) to position in `all`. BM25 indexes
         // by position (0-indexed dense), but vec0 returns the chunk_id.
+        // When repo_filter is set, this map only contains in-repo chunks —
+        // dense neighbours from other repos get dropped at the lookup stage.
         let mut id_to_pos = std::collections::HashMap::with_capacity(all.len());
         for (pos, row) in all.iter().enumerate() {
             id_to_pos.insert(row.0, pos as u32);
@@ -378,7 +432,13 @@ impl SearchStore {
         let mut sem_ranked: Vec<(u32, f32)> = Vec::new();
         if let Some(qv) = query_embedding {
             if self.embedding_count()? > 0 && qv.len() == DIM {
-                let neighbours = self.knn_search(qv, k * 4)?;
+                // vec0 has no per-repo predicate, so when filtering to one repo
+                // we over-fetch and let id_to_pos drop out-of-repo rows. The
+                // 4× multiplier already over-fetches for k; an extra 4× for
+                // repo filter handles workspaces where a repo holds ≤25% of
+                // the chunks (typical for our 40-repo ttec workspace).
+                let knn_k = if repo_filter.is_some() { k * 16 } else { k * 4 };
+                let neighbours = self.knn_search(qv, knn_k)?;
                 for (chunk_id, dist) in &neighbours {
                     if *dist > DENSE_LOOSE_DIST_MAX {
                         continue;
@@ -421,12 +481,12 @@ impl SearchStore {
                     .take(k)
                     .collect();
                 if strict.is_empty() {
-                    let hits = self.search_substring(query, k)?;
+                    let hits = self.search_substring_filtered(query, k, repo_filter)?;
                     return Ok((hits, SearchLane::Substring));
                 }
                 (strict, SearchLane::SemanticOnly)
             } else {
-                let hits = self.search_substring(query, k)?;
+                let hits = self.search_substring_filtered(query, k, repo_filter)?;
                 return Ok((hits, SearchLane::Substring));
             };
 
@@ -454,15 +514,19 @@ impl SearchStore {
     /// always `1.0` (exact substring match). Used as the deterministic
     /// fallback when neither BM25 nor the dense index produces hits.
     pub fn search_substring(&self, query: &str, k: usize) -> Result<Vec<SearchHit>> {
+        self.search_substring_filtered(query, k, None)
+    }
+
+    /// Substring fallback restricted to a single repo when `repo_filter` is set.
+    pub fn search_substring_filtered(
+        &self,
+        query: &str,
+        k: usize,
+        repo_filter: Option<&str>,
+    ) -> Result<Vec<SearchHit>> {
         let q_lower = query.to_lowercase();
         let pat = format!("%{}%", q_lower);
-        let mut stmt = self.conn.prepare(
-            "SELECT id, repo, path, start_line, end_line, content
-             FROM chunks
-             WHERE LOWER(content) LIKE ?1
-             LIMIT ?2",
-        )?;
-        let rows = stmt.query_map(params![pat, k as i64], |row| {
+        let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<SearchHit> {
             Ok(SearchHit {
                 id: row.get(0)?,
                 repo: row.get(1)?,
@@ -472,9 +536,30 @@ impl SearchStore {
                 content: row.get(5)?,
                 score: 1.0,
             })
-        })?;
-        let v: std::result::Result<Vec<_>, _> = rows.collect();
-        Ok(v?)
+        };
+        let rows: rusqlite::Result<Vec<_>> = match repo_filter {
+            None => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, repo, path, start_line, end_line, content
+                     FROM chunks
+                     WHERE LOWER(content) LIKE ?1
+                     LIMIT ?2",
+                )?;
+                let mapped = stmt.query_map(params![pat, k as i64], map_row)?;
+                mapped.collect()
+            }
+            Some(repo) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, repo, path, start_line, end_line, content
+                     FROM chunks
+                     WHERE repo = ?1 AND LOWER(content) LIKE ?2
+                     LIMIT ?3",
+                )?;
+                let mapped = stmt.query_map(params![repo, pat, k as i64], map_row)?;
+                mapped.collect()
+            }
+        };
+        Ok(rows?)
     }
 }
 

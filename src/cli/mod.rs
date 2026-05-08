@@ -7,6 +7,7 @@ pub mod compat;
 pub mod init;
 pub mod install;
 pub mod query;
+pub mod repo_filter;
 pub mod update;
 pub mod view;
 
@@ -22,6 +23,9 @@ pub enum Command {
     Query {
         /// Substring to match against declaration symbols
         text: String,
+        /// Restrict matches to a single repo (must match a name in repolayer.yml)
+        #[arg(long)]
+        repo: Option<String>,
         /// Emit JSON instead of human-readable text
         #[arg(long)]
         json: bool,
@@ -95,6 +99,11 @@ pub enum Command {
         /// Number of results to return
         #[arg(short, long, default_value_t = 10)]
         k: usize,
+        /// Restrict to a single repo (must match a name in repolayer.yml).
+        /// BM25 IDF is computed over just that repo, so common workspace
+        /// terms aren't penalised inside the repo.
+        #[arg(long)]
+        repo: Option<String>,
         /// Emit JSON instead of human-readable text
         #[arg(long)]
         json: bool,
@@ -137,7 +146,7 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Init => init::run().await,
         Command::Build => build::run().await,
         Command::Update => update::run().await,
-        Command::Query { text, json } => query::run(text, json).await,
+        Command::Query { text, repo, json } => query::run(text, repo, json).await,
         Command::Outline { paths, json } => compat::outline::run(paths, json).await,
         Command::Show { file, symbols, json } => compat::show::run(file, symbols, json).await,
         Command::Digest { paths, json } => compat::digest::run(paths, json).await,
@@ -151,9 +160,10 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Search {
             query,
             k,
+            repo,
             json,
             full_content,
-        } => compat::search::run(query, k, json, full_content).await,
+        } => compat::search::run(query, k, repo, json, full_content).await,
         Command::FindRelated { spec, k, json } => compat::find_related::run(spec, k, json).await,
         Command::Install { skill } => install::run(&skill).await,
         Command::View { out, repo } => view::run(out, repo).await,

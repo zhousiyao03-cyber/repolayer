@@ -10,12 +10,19 @@
 //! (callers already get path:line_range and can fetch with `repolayer show`).
 //! Pass `--full-content` when you actually need the body inline.
 
+use crate::cli::repo_filter::require_repo;
 use crate::search::store::SearchLane;
 use anyhow::Result;
 
 const PREVIEW_CHARS: usize = 200;
 
-pub async fn run(query: String, k: usize, json: bool, full_content: bool) -> Result<()> {
+pub async fn run(
+    query: String,
+    k: usize,
+    repo: Option<String>,
+    json: bool,
+    full_content: bool,
+) -> Result<()> {
     let workspace = std::env::current_dir()?;
     let db = workspace.join(".repolayer").join("search.db");
     if !db.exists() {
@@ -27,11 +34,25 @@ pub async fn run(query: String, k: usize, json: bool, full_content: bool) -> Res
 
     let store = crate::search::store::SearchStore::open(&db)?;
 
+    let validated_repo = match repo.as_deref() {
+        None => None,
+        Some(name) => {
+            let known = store.list_repo_names()?;
+            Some(require_repo(name, &known)?.to_string())
+        }
+    };
+
     // Try to encode the query with the cached embedding model. If the model
     // isn't there, we silently degrade to BM25-only.
     let qv = crate::search::embed::try_encode_query(&query);
 
-    let (hits, lane) = store.search_hybrid(&query, k, qv.as_deref(), None)?;
+    let (hits, lane) = store.search_hybrid_filtered(
+        &query,
+        k,
+        qv.as_deref(),
+        None,
+        validated_repo.as_deref(),
+    )?;
 
     if json {
         let entries: Vec<serde_json::Value> = hits
@@ -55,6 +76,7 @@ pub async fn run(query: String, k: usize, json: bool, full_content: bool) -> Res
         let envelope = serde_json::json!({
             "schema_version": "repolayer.search.v1",
             "query": query,
+            "repo_filter": validated_repo,
             "lane": lane.as_str(),
             "hits": entries,
             "full_content": full_content,
@@ -63,15 +85,30 @@ pub async fn run(query: String, k: usize, json: bool, full_content: bool) -> Res
         return Ok(());
     }
 
+    let scope = match validated_repo.as_deref() {
+        Some(r) => format!(" in repo={}", r),
+        None => String::new(),
+    };
     if hits.is_empty() {
-        println!("# no results for '{}'", query);
-        println!("# fallback: `repolayer query \"<symbol>\"` for exact symbol lookup, or `rg \"{}\"` for literal grep", query);
+        println!("# no results for '{}'{}", query, scope);
+        if validated_repo.is_some() {
+            println!(
+                "# fallback: drop --repo to widen, or `rg \"{}\" <repo path>` for literal grep",
+                query
+            );
+        } else {
+            println!(
+                "# fallback: `repolayer query \"<symbol>\"` for exact symbol lookup, or `rg \"{}\"` for literal grep",
+                query
+            );
+        }
         return Ok(());
     }
     println!(
-        "# {} hits for '{}' — lane={} — fetch bodies with `repolayer show <path> <symbol>`",
+        "# {} hits for '{}'{} — lane={} — fetch bodies with `repolayer show <path> <symbol>`",
         hits.len(),
         query,
+        scope,
         lane.as_str(),
     );
     if let Some(warning) = lane_warning(lane) {

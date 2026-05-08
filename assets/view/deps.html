@@ -30,6 +30,8 @@
     <span><a href="index.html">← back</a></span>
     <label>repo: <select id="repo"></select></label>
     <label>filter: <input id="q" type="search" placeholder="path…"></label>
+    <button id="fit">fit</button>
+    <button id="relayout">physics layout (slow)</button>
     <span class="stats" id="stats">loading…</span>
   </header>
   <main id="cy">
@@ -44,63 +46,84 @@
   const stats = document.getElementById('stats');
   const repoSel = document.getElementById('repo');
 
-  let data;
-  try { data = await fetch('data/deps.json').then(r => r.json()); }
+  let manifest;
+  try { manifest = await fetch('data/deps_manifest.json').then(r => r.json()); }
   catch (e) {
-    status.textContent = 'cannot fetch data/deps.json — open this page via a local server.';
+    status.textContent = 'cannot fetch data/deps_manifest.json — open via a local server.';
     return;
   }
-
-  const repos = Object.keys(data).sort();
-  if (!repos.length) { status.textContent = 'deps.db has no edges'; return; }
-  repos.forEach(r => {
-    const o = document.createElement('option'); o.value = r; o.textContent = r;
+  if (!manifest.length) { status.textContent = 'deps.db has no edges'; return; }
+  manifest.sort((a, b) => b.edges - a.edges);
+  manifest.forEach(m => {
+    const o = document.createElement('option'); o.value = m.repo;
+    o.textContent = `${m.repo} (${m.files}f · ${m.edges}e)`;
     repoSel.appendChild(o);
   });
 
   let cy = null;
-  function render(repo) {
-    if (cy) cy.destroy();
-    const els = data[repo];
+  async function render(repo) {
+    if (cy) { cy.destroy(); cy = null; }
+    status.textContent = `fetching deps/${repo}.json…`;
+    let els;
+    try { els = await fetch(`data/deps/${sanitize(repo)}.json`).then(r => r.json()); }
+    catch (e) { status.textContent = `failed: ${e.message || e}`; return; }
     stats.textContent = `${els.nodes.length} files · ${els.edges.length} edges`;
     status.textContent = 'rendering…';
     cy = cytoscape({
       container: document.getElementById('cy'),
       elements: [...els.nodes, ...els.edges],
-      minZoom: 0.05, maxZoom: 4,
+      minZoom: 0.02, maxZoom: 4,
+      textureOnViewport: true,
+      hideEdgesOnViewport: true,
+      pixelRatio: 1,
+      motionBlur: false,
+      wheelSensitivity: 0.3,
       style: [
         { selector: 'node',
           style: {
             'label': 'data(label)',
             'color': '#c9d1d9',
-            'font-size': 8,
+            'font-size': 7,
+            'min-zoomed-font-size': 12,
             'text-valign': 'center', 'text-halign': 'center',
             'text-outline-color': '#0d1117', 'text-outline-width': 2,
             'background-color': '#58a6ff',
-            'width': 10, 'height': 10,
+            'width': 6, 'height': 6,
           }},
         { selector: 'edge',
           style: {
             'curve-style': 'bezier',
-            'width': 1, 'line-color': '#6e7681',
+            'width': 0.6, 'line-color': '#6e7681',
             'target-arrow-color': '#6e7681', 'target-arrow-shape': 'triangle',
-            'arrow-scale': 0.6, 'opacity': 0.5,
+            'arrow-scale': 0.5, 'opacity': 0.4,
           }},
-        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#fff' } },
+        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#fff', 'width': 12, 'height': 12 } },
         { selector: '.dim', style: { opacity: 0.06 } },
       ],
-      layout: {
-        name: 'fcose', animate: false, randomize: true,
-        nodeRepulsion: 2500, idealEdgeLength: 50, packComponents: true,
-      },
+      // preset = use server-computed positions; no layout solver runs.
+      layout: { name: 'preset', fit: true, padding: 40 },
     });
     cy.ready(() => {
-      status.textContent = `${cy.nodes().length} files · ${cy.edges().length} edges`;
+      status.textContent = `${cy.nodes().length} files · ${cy.edges().length} edges · directory-grouped grid · click "physics layout" to refine`;
     });
   }
 
   repoSel.addEventListener('change', () => render(repoSel.value));
-  render(repos[0]);
+  document.getElementById('fit').addEventListener('click', () => cy && cy.fit(null, 40));
+  function sanitize(s) { return s.replace(/[^A-Za-z0-9_-]/g, '_'); }
+  document.getElementById('relayout').addEventListener('click', () => {
+    if (!cy) return;
+    const n = cy.nodes().length;
+    if (n > 2000 && !confirm(`run physics layout on ${n} nodes? this can take 30s+ and freeze the tab.`)) return;
+    status.textContent = `running fcose on ${n} nodes…`;
+    const t0 = performance.now();
+    cy.layout({
+      name: 'fcose', animate: false, randomize: false,
+      nodeRepulsion: 2500, idealEdgeLength: 50, packComponents: true, fit: true,
+    }).run();
+    status.textContent = `fcose done in ${Math.round(performance.now() - t0)}ms`;
+  });
+  render(manifest[0].repo);
 
   document.getElementById('q').addEventListener('input', e => {
     if (!cy) return;

@@ -302,20 +302,57 @@ impl Store {
     }
 
     pub fn search_symbols_substring(&self, q: &str, limit: usize) -> Result<Vec<Node>> {
+        self.search_symbols_substring_filtered(q, None, limit)
+    }
+
+    /// Same as [`search_symbols_substring`] but optionally restricts matches
+    /// to a single repo. Required by `repolayer query --repo <name>`.
+    pub fn search_symbols_substring_filtered(
+        &self,
+        q: &str,
+        repo_filter: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<Node>> {
         let escaped = q
             .replace('\\', "\\\\")
             .replace('%', "\\%")
             .replace('_', "\\_");
         let pattern = format!("%{}%", escaped);
-        let mut stmt = self.conn.prepare(
-            "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
-             FROM nodes WHERE kind IN ('type', 'method', 'function', 'symbol')
-               AND (symbol LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\')
-             LIMIT ?2",
-        )?;
-        let rows = stmt
-            .query_map(params![pattern, limit as i64], row_to_node)?
-            .collect::<Result<Vec<_>, _>>()?;
+        let rows: Vec<Node> = match repo_filter {
+            None => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
+                     FROM nodes WHERE kind IN ('type', 'method', 'function', 'symbol')
+                       AND (symbol LIKE ?1 ESCAPE '\\' OR path LIKE ?1 ESCAPE '\\')
+                     LIMIT ?2",
+                )?;
+                let mapped = stmt.query_map(params![pattern, limit as i64], row_to_node)?;
+                mapped.collect::<Result<Vec<_>, _>>()?
+            }
+            Some(repo) => {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated
+                     FROM nodes WHERE kind IN ('type', 'method', 'function', 'symbol')
+                       AND repo = ?1
+                       AND (symbol LIKE ?2 ESCAPE '\\' OR path LIKE ?2 ESCAPE '\\')
+                     LIMIT ?3",
+                )?;
+                let mapped =
+                    stmt.query_map(params![repo, pattern, limit as i64], row_to_node)?;
+                mapped.collect::<Result<Vec<_>, _>>()?
+            }
+        };
         Ok(rows)
+    }
+
+    /// Distinct repo names recorded in the nodes table. Used to suggest
+    /// alternatives when a `--repo` argument doesn't match any known repo.
+    pub fn list_repo_names(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT DISTINCT repo FROM nodes ORDER BY repo")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let v: rusqlite::Result<Vec<_>> = rows.collect();
+        Ok(v?)
     }
 }

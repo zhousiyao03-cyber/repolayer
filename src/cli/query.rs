@@ -1,8 +1,9 @@
+use crate::cli::repo_filter::require_repo;
 use crate::graph::store::Store;
 use anyhow::{bail, Result};
 use std::path::PathBuf;
 
-pub async fn run(text: String, json: bool) -> Result<()> {
+pub async fn run(text: String, repo: Option<String>, json: bool) -> Result<()> {
     let db_path = PathBuf::from(".repolayer/index.db");
     if !db_path.exists() {
         bail!(
@@ -11,7 +12,23 @@ pub async fn run(text: String, json: bool) -> Result<()> {
         );
     }
     let store = Store::open(&db_path)?;
-    let results = store.search_symbols_substring(&text, 20)?;
+
+    // Validate `--repo` against the index's known repos before querying.
+    // This produces a "did you mean ..." error on typos, which is much
+    // friendlier to agents than silently returning zero hits.
+    let validated_repo = match repo.as_deref() {
+        None => None,
+        Some(name) => {
+            let known = store.list_repo_names()?;
+            Some(require_repo(name, &known)?.to_string())
+        }
+    };
+
+    let results = store.search_symbols_substring_filtered(
+        &text,
+        validated_repo.as_deref(),
+        20,
+    )?;
 
     if json {
         let entries: Vec<serde_json::Value> = results
@@ -29,18 +46,32 @@ pub async fn run(text: String, json: bool) -> Result<()> {
         let envelope = serde_json::json!({
             "schema_version": "repolayer.query.v1",
             "query": text,
+            "repo_filter": validated_repo,
             "matches": entries,
         });
         println!("{}", serde_json::to_string_pretty(&envelope)?);
         return Ok(());
     }
 
+    let scope = match validated_repo.as_deref() {
+        Some(r) => format!(" in repo={}", r),
+        None => String::new(),
+    };
     if results.is_empty() {
-        println!("# no matches for '{}'", text);
-        println!("# fallback: try `repolayer search \"{}\"` for fuzzy / semantic matches, or `rg` for literal lookup", text);
+        println!("# no matches for '{}'{}", text, scope);
+        if validated_repo.is_some() {
+            println!("# fallback: drop --repo to widen, or try `repolayer search` for fuzzy / semantic matches");
+        } else {
+            println!("# fallback: try `repolayer search \"{}\"` for fuzzy / semantic matches, or `rg` for literal lookup", text);
+        }
         return Ok(());
     }
-    println!("# {} matches for '{}' — repo\tpath::symbol\tline", results.len(), text);
+    println!(
+        "# {} matches for '{}'{} — repo\tpath::symbol\tline",
+        results.len(),
+        text,
+        scope,
+    );
     for n in results {
         println!(
             "{}\t{}::{}\t{}",

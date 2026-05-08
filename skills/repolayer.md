@@ -38,10 +38,13 @@ description: |
 
 ## 命令参考
 
-### `repolayer query <text> [--json]`
+### `repolayer query <text> [--repo <name>] [--json]`
 
 在 graph 里查 declaration（function / method / type / module）。
 对 symbol 名和 path **同时**做子串匹配，返回 `repo \t path::symbol \t line`，最多 20 条。
+
+`--repo <name>` 限制结果到指定仓（必须匹配 `repolayer.yml` 里的 name；
+拼错时报错并给最近建议）。多仓里同名符号太多时优先加 `--repo` 收敛。
 
 ```
 $ repolayer query "GetDiscountList"
@@ -54,7 +57,7 @@ oec_promotion_voucher_api	biz/handler/get_discount_list.go::NewGetDiscountListHa
 `--json` 返回 `{schema_version, query, matches: [{repo, path, symbol, kind, line}]}`。
 0 命中时退出码仍为 0，stdout 给降级建议（试 `search` 或 `rg`）。
 
-### `repolayer search <query> [-k N] [--json] [--full-content]`
+### `repolayer search <query> [-k N] [--repo <name>] [--json] [--full-content]`
 
 混合 BM25 + 语义检索，返回 top-K 个 chunk（默认 10）。
 索引粒度是 declaration（function / method / type 头），不是逐行 —— 比 `rg` 信噪比高，
@@ -65,6 +68,10 @@ JSON 默认**不返 chunk 内容**，只返 200 字符 `preview`，envelope 含 
 
 - 已知 `path:line_range` → `repolayer show <path> <symbol>` （AST-边界精确）
 - 真要原文 chunk → 加 `--full-content`（注意 token 成本）
+
+`--repo <name>` 限制到单个仓。多仓 query 默认会被高 IDF 跨仓项挤掉本仓内的"刚好够相关"
+结果——加 `--repo` 后 BM25 在该仓内重新算 IDF，结果排名更贴合该仓自身。
+拼错仓名时会报 "Did you mean ..." + 最接近的 5 个候选名，可直接抓正确名重试。
 
 **lane 字段含义（影响结果可信度）**：
 

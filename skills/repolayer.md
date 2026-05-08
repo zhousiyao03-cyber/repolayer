@@ -82,6 +82,27 @@ repolayer search "/api/v1/<path>"
 能让 BM25 IDF 在该仓内重新计算，结果更贴合。仓名拼错时 CLI 会列 5 个最近候选，
 直接抓正确名重试即可。
 
+**🚫 降级铁律（千万别踩）**：
+
+1. **`repolayer show` 报 `no adapter for ...`** 只代表那一种文件类型不支持
+   （目前 IDL `.proto` / `.thrift` 不支持 `show`）。**不要因此放弃整个 repolayer**——
+   IDL 内容继续用 `repolayer query "<Method>"` 看节点位置 + `grep -n "<Method>" <proto-file>`
+   定位行号，**不要**触发任何 `grep -r` 全盘扫描。
+
+2. **永远不要** `grep -r` / `grep -rln` / `find` 直接扫这两个目录：
+   - `/Users/bytedance/`（家目录，几十个仓 + node_modules，分钟级）
+   - `/Users/bytedance/web_monorepo-master/packages/`（前端 monorepo，~2 分钟）
+
+   harness 会自动把这种命令转后台并要你 polling
+   `/private/tmp/claude-501/.../tasks/*.output`——这条路必慢。
+   **正确替代**：`repolayer search "<term>"` 毫秒返回；范围已知就加 `--repo <name>`
+   或单仓 `--repo` 多次调用，比一次全盘 grep 快 100 倍以上。
+
+3. `repolayer query` / `search` 0 命中**不代表索引坏了**，可能是：
+   - query 字面错（驼峰 vs snake_case：试两种）
+   - 仓不在索引清单（看 `repolayer.yml`，问用户加仓而不是 fallback grep 整个 `~/`）
+   - 真的不存在（这时候 `rg` 单仓内可以兜底，但**不要**扫 `~/`）
+
 ---
 
 ## 命令参考

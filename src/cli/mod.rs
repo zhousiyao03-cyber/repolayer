@@ -8,6 +8,7 @@ pub mod init;
 pub mod install;
 pub mod query;
 pub mod update;
+pub mod view;
 
 #[derive(Subcommand)]
 pub enum Command {
@@ -17,10 +18,14 @@ pub enum Command {
     Build,
     /// Incrementally update graph based on git diff
     Update,
-    /// Query the graph from CLI (debug)
-    Query { text: String },
-    /// Find callers of a symbol
-    Callers { symbol: String },
+    /// Query the graph for declarations whose symbol contains <text>
+    Query {
+        /// Substring to match against declaration symbols
+        text: String,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
     /// Print structural outline of source files (signatures, line ranges, no method bodies)
     Outline {
         /// Files or directories to outline
@@ -93,6 +98,10 @@ pub enum Command {
         /// Emit JSON instead of human-readable text
         #[arg(long)]
         json: bool,
+        /// Include the full chunk body in JSON output (default: short preview only).
+        /// Hits already include path:line_range — fetch bodies with `repolayer show`.
+        #[arg(long)]
+        full_content: bool,
     },
     /// Find code chunks structurally similar to a given file:line
     #[command(name = "find-related")]
@@ -112,6 +121,15 @@ pub enum Command {
         #[arg(long)]
         skill: String,
     },
+    /// Export the indices to a self-contained HTML viewer
+    View {
+        /// Output directory (created if missing)
+        #[arg(long)]
+        out: PathBuf,
+        /// Limit export to a single repo by name (default: all repos)
+        #[arg(long)]
+        repo: Option<String>,
+    },
 }
 
 pub async fn run(cmd: Command) -> Result<()> {
@@ -119,8 +137,7 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Init => init::run().await,
         Command::Build => build::run().await,
         Command::Update => update::run().await,
-        Command::Query { text } => query::run(text).await,
-        Command::Callers { .. } => anyhow::bail!("not implemented yet"),
+        Command::Query { text, json } => query::run(text, json).await,
         Command::Outline { paths, json } => compat::outline::run(paths, json).await,
         Command::Show { file, symbols, json } => compat::show::run(file, symbols, json).await,
         Command::Digest { paths, json } => compat::digest::run(paths, json).await,
@@ -131,8 +148,14 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Deps { path, depth, json } => compat::deps::run(path, depth, json).await,
         Command::ReverseDeps { path, json } => compat::reverse_deps::run(path, json).await,
         Command::Cycles { path, json } => compat::cycles::run(path, json).await,
-        Command::Search { query, k, json } => compat::search::run(query, k, json).await,
+        Command::Search {
+            query,
+            k,
+            json,
+            full_content,
+        } => compat::search::run(query, k, json, full_content).await,
         Command::FindRelated { spec, k, json } => compat::find_related::run(spec, k, json).await,
         Command::Install { skill } => install::run(&skill).await,
+        Command::View { out, repo } => view::run(out, repo).await,
     }
 }

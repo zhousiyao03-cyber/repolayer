@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>repolayer · main graph</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --border: #30363d;
+    --fg: #c9d1d9;
+    --fg-dim: #8b949e;
+    --accent: #58a6ff;
+    --kind-repo: #f78166;
+    --kind-module: #58a6ff;
+    --kind-idlservice: #d2a8ff;
+    --edge-imports: #6e7681;
+    --edge-implements: #2ea043;
+    --edge-invokes: #f0883e;
+    --edge-defines: #d2a8ff;
+    --edge-extends: #56d364;
+    --edge-calls: #79c0ff;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+              font-size: 13px; }
+  #app { display: grid; grid-template-columns: 240px 1fr 360px; height: 100vh; }
+  .pane { background: var(--panel); border-right: 1px solid var(--border); overflow: auto; }
+  .pane h2 { font-size: 11px; text-transform: uppercase; color: var(--fg-dim);
+             margin: 12px 12px 6px; letter-spacing: 0.05em; }
+  .pane label { display: flex; align-items: center; gap: 6px; padding: 4px 12px;
+                cursor: pointer; user-select: none; font-size: 12px; }
+  .pane label:hover { background: rgba(88,166,255,0.05); }
+  .pane label input { margin: 0; }
+  .swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .toolbar { padding: 12px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+  .toolbar input[type=search] { background: #0d1117; border: 1px solid var(--border);
+                                color: var(--fg); padding: 4px 8px; border-radius: 4px; outline: none; }
+  .toolbar button { background: #21262d; border: 1px solid var(--border); color: var(--fg);
+                    padding: 4px 10px; border-radius: 4px; cursor: pointer; text-align: left; font-size: 12px; }
+  .toolbar button:hover { background: #30363d; }
+  .hint { padding: 8px 12px; color: var(--fg-dim); font-size: 11px; line-height: 1.5; }
+  #cy { position: relative; background: #0d1117;
+        background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+        background-size: 16px 16px; }
+  #side { border-left: 1px solid var(--border); border-right: none; }
+  #side .empty { padding: 24px 16px; color: var(--fg-dim); font-style: italic; }
+  #side h3 { margin: 14px 14px 4px; font-size: 14px; word-break: break-all; }
+  #side .meta { padding: 0 14px 8px; color: var(--fg-dim); font-size: 11px;
+                word-break: break-all; }
+  #side .decl-tree { padding: 0 14px 24px; font-family: "SF Mono", Menlo, monospace;
+                     font-size: 12px; line-height: 1.6; }
+  #side .decl { padding-left: 14px; border-left: 1px solid var(--border); }
+  #side .decl-line { display: flex; gap: 6px; }
+  #side .decl-line .k { color: var(--fg-dim); width: 80px; flex-shrink: 0; }
+  #side .decl-line .n { color: var(--fg); }
+  #side .decl-line .ln { color: var(--fg-dim); margin-left: auto; font-size: 10px; }
+  #status { position: absolute; bottom: 12px; left: 12px; background: var(--panel);
+            border: 1px solid var(--border); padding: 6px 10px; border-radius: 4px;
+            font-size: 11px; color: var(--fg-dim); max-width: 60%; }
+  .loaded-repo { display: flex; align-items: center; gap: 4px; padding: 2px 12px; font-size: 11px; }
+  .loaded-repo .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .loaded-repo button { background: transparent; color: var(--fg-dim); border: none;
+                        cursor: pointer; padding: 2px 6px; }
+  .loaded-repo button:hover { color: #f85149; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside class="pane" id="left">
+    <div class="toolbar">
+      <a href="index.html">← back</a>
+      <input id="q" type="search" placeholder="filter…" />
+      <button id="fit">fit to screen</button>
+      <button id="reset">reset to overview</button>
+    </div>
+    <div class="hint">
+      <strong>double-click a repo</strong> to load its modules.
+      <br><br>
+      cross-repo edges are aggregated counts at this level — open one or both
+      endpoints to see the actual edges.
+    </div>
+    <h2>loaded repos</h2>
+    <div id="loaded"></div>
+    <h2>edge kinds</h2>
+    <div id="edges"></div>
+  </aside>
+  <main id="cy">
+    <div id="status">loading…</div>
+  </main>
+  <aside class="pane" id="side">
+    <div class="empty">click a Module node to load its outline</div>
+  </aside>
+</div>
+
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+<script>
+(async () => {
+  const status = document.getElementById('status');
+  if (typeof cytoscape === 'undefined') {
+    status.textContent = 'failed to load Cytoscape from CDN. open this file via a local server, or check network access.';
+    return;
+  }
+
+  const kindColor = {
+    repo: getCss('--kind-repo'),
+    module: getCss('--kind-module'),
+    idlservice: getCss('--kind-idlservice'),
+  };
+  const edgeColor = {
+    imports: getCss('--edge-imports'),
+    implements: getCss('--edge-implements'),
+    invokes: getCss('--edge-invokes'),
+    defines: getCss('--edge-defines'),
+    extends: getCss('--edge-extends'),
+    calls: getCss('--edge-calls'),
+  };
+
+  status.textContent = 'fetching overview…';
+  let overview;
+  try { overview = await fetch('data/overview.json').then(r => r.json()); }
+  catch (e) {
+    status.textContent = 'cannot fetch data/overview.json — open this page via a local server (python3 -m http.server) rather than file://';
+    return;
+  }
+
+  const cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: [...overview.nodes, ...overview.edges],
+    minZoom: 0.05,
+    maxZoom: 4,
+    textureOnViewport: true,
+    hideEdgesOnViewport: true,
+    pixelRatio: 1,
+    motionBlur: false,
+    wheelSensitivity: 0.3,
+    style: [
+      { selector: 'node',
+        style: {
+          'label': 'data(label)',
+          'color': '#c9d1d9',
+          'font-size': 10,
+          'min-zoomed-font-size': 10,    // hide labels when zoomed out far
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'text-outline-color': '#0d1117',
+          'text-outline-width': 2,
+          'background-color': ele => kindColor[ele.data('kind')] || '#888',
+          'width': 10, 'height': 10,
+        }},
+      { selector: 'node[kind = "module"]',
+        style: {
+          'width': 6, 'height': 6,
+          'font-size': 8,
+          'min-zoomed-font-size': 14,    // labels only when zoomed in
+          'background-opacity': 0.85,
+        }},
+      { selector: 'node[kind = "repo"]',
+        style: {
+          'shape': 'round-rectangle',
+          'background-color': '#21262d',
+          'background-opacity': 1,
+          'border-width': 1,
+          'border-color': kindColor.repo,
+          'border-opacity': 0.7,
+          'width': 'label', 'height': 22,
+          'padding': '8px',
+          'font-size': 11, 'font-weight': 'normal',
+          'color': '#c9d1d9',
+          'text-outline-width': 0,
+        }},
+      { selector: 'node[kind = "repo"][?is_hub]',
+        style: {
+          'background-color': kindColor.repo,
+          'color': '#0d1117',
+          'font-weight': 'bold',
+          'border-width': 0,
+        }},
+      { selector: 'node[?external]',
+        style: {
+          'background-opacity': 0.4,
+          'border-width': 1,
+          'border-style': 'dashed',
+          'border-color': '#888',
+        }},
+      { selector: 'node[kind = "idlservice"]', style: { shape: 'diamond', width: 16, height: 16 } },
+      { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#fff' } },
+      { selector: 'edge',
+        style: {
+          // unbundled-bezier with offset distances de-overlaps parallel edges
+          // between the same two repos (e.g. implements + invokes both A→B).
+          'curve-style': 'unbundled-bezier',
+          'control-point-distances': [-30, 0, 30],
+          'control-point-weights': [0.25, 0.5, 0.75],
+          'width': ele => {
+            const c = ele.data('count');
+            if (c) return Math.min(0.6 + Math.log2(c) * 0.8, 6);
+            return 1;
+          },
+          'line-color': ele => edgeColor[ele.data('kind')] || '#555',
+          'target-arrow-color': ele => edgeColor[ele.data('kind')] || '#555',
+          'target-arrow-shape': 'triangle',
+          'arrow-scale': 0.7,
+          'opacity': 0.55,
+        }},
+      { selector: 'edge:selected', style: { 'opacity': 1, 'width': 4,
+          'label': ele => ele.data('count') ? `${ele.data('kind')} ×${ele.data('count')}` : ele.data('kind'),
+          'font-size': 10, 'color': '#fff',
+          'text-background-color': '#0d1117', 'text-background-opacity': 0.9,
+          'text-background-padding': 3 }},
+      { selector: 'edge[?cross_repo]', style: { 'opacity': 0.7 } },
+      { selector: 'edge[confidence < 0.7]', style: { 'line-style': 'dashed' } },
+      { selector: '.dim', style: { opacity: 0.06 } },
+      { selector: '.hi',  style: { opacity: 1 } },
+    ],
+    layout: { name: 'preset', fit: true, padding: 60 },
+  });
+
+  status.textContent = `overview: ${cy.nodes().length} repos · ${cy.edges().length} aggregated edges · double-click a repo to expand`;
+
+  // ---------- edge-kind filters (apply to both overview and loaded subgraphs) ----------
+  // Default-on: implements / invokes / defines  (the IDL-flow trio)
+  // Default-off: imports / calls / extends      (noisier or much more numerous)
+  const defaultOn = new Set(['implements', 'invokes', 'defines']);
+  const edgeFilters = new Map();   // kind -> bool (current checkbox state)
+  const edgeBox = document.getElementById('edges');
+  Object.keys(edgeColor).forEach(k => {
+    edgeFilters.set(k, defaultOn.has(k));
+    const row = document.createElement('label');
+    const sw = document.createElement('span'); sw.className = 'swatch'; sw.style.background = edgeColor[k];
+    const cb = document.createElement('input'); cb.type = 'checkbox';
+    cb.checked = defaultOn.has(k);
+    const text = document.createElement('span'); text.textContent = k;
+    row.append(cb, sw, text);
+    cb.addEventListener('change', () => {
+      edgeFilters.set(k, cb.checked);
+      cy.edges(`[kind="${k}"]`).style('display', cb.checked ? 'element' : 'none');
+    });
+    edgeBox.appendChild(row);
+    if (!cb.checked) cy.edges(`[kind="${k}"]`).style('display', 'none');
+  });
+
+  // ---------- toolbar ----------
+  document.getElementById('fit').addEventListener('click', () => cy.fit(null, 60));
+  document.getElementById('reset').addEventListener('click', () => {
+    cy.elements().not('node[kind="repo"]').remove();
+    // restore aggregated overview edges
+    const repoIds = new Set(cy.nodes('[kind="repo"]').map(n => n.id()));
+    const overviewEdges = overview.edges.filter(e =>
+      repoIds.has(e.data.source) && repoIds.has(e.data.target)
+    );
+    // remove any non-overview edges first
+    cy.edges().remove();
+    cy.add(overviewEdges);
+    loadedRepos.clear();
+    refreshLoadedList();
+    cy.fit(null, 60);
+    status.textContent = 'overview restored';
+  });
+
+  // ---------- search ----------
+  document.getElementById('q').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    if (!q) { cy.elements().removeClass('dim hi'); return; }
+    cy.batch(() => {
+      cy.elements().addClass('dim').removeClass('hi');
+      const hit = cy.nodes().filter(n =>
+        (n.data('label') || '').toLowerCase().includes(q) ||
+        (n.data('path') || '').toLowerCase().includes(q) ||
+        (n.data('symbol') || '').toLowerCase().includes(q) ||
+        (n.data('repo') || '').toLowerCase().includes(q)
+      );
+      hit.removeClass('dim').addClass('hi');
+      hit.connectedEdges().removeClass('dim').addClass('hi');
+      hit.connectedEdges().connectedNodes().removeClass('dim').addClass('hi');
+    });
+  });
+
+  // ---------- repo expand on double-click ----------
+  const loadedRepos = new Map();   // repo -> { nodes, edges }
+  const inflight = new Set();
+
+  cy.on('dbltap', 'node[kind="repo"]', async evt => {
+    const repo = evt.target.data('repo') || evt.target.data('label');
+    if (loadedRepos.has(repo) || inflight.has(repo)) return;
+    inflight.add(repo);
+    status.textContent = `loading repo ${repo}…`;
+    try {
+      const data = await fetch(`data/repo/${sanitize(repo)}.json`).then(r => r.json());
+      addRepoSubgraph(repo, data);
+      status.textContent = `loaded ${repo} · ${data.nodes.length} nodes · ${data.edges.length} edges`;
+    } catch (e) {
+      status.textContent = `failed to load ${repo}: ${e.message || e}`;
+    } finally {
+      inflight.delete(repo);
+    }
+  });
+
+  function addRepoSubgraph(repo, data) {
+    // Anchor the repo's children near the repo node so they appear inside it.
+    const repoNode = cy.nodes(`[repo="${repo}"][kind="repo"]`)[0];
+    const offset = repoNode ? repoNode.position() : { x: 0, y: 0 };
+
+    // When loading, drop overview-aggregated edges that involve THIS repo —
+    // they get replaced by real per-repo edges.
+    cy.edges().filter(e => e.data('source') === repoNode.id() || e.data('target') === repoNode.id()).remove();
+
+    // Find a free direction to place the cluster: away from canvas centre.
+    const cyCenter = { x: 0, y: 0 };  // overview is centred at origin
+    const dx = offset.x - cyCenter.x;
+    const dy = offset.y - cyCenter.y;
+    const len = Math.hypot(dx, dy) || 1;
+    const ux = dx / len, uy = dy / len;
+    const stride = 800;   // push cluster this far outward from the repo node
+    const clusterCenter = { x: offset.x + ux * stride, y: offset.y + uy * stride };
+
+    // Bounding box of incoming positions, to recentre on clusterCenter.
+    const xs = data.nodes.map(n => n.position?.x || 0);
+    const ys = data.nodes.map(n => n.position?.y || 0);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const cx = (minX + maxX) / 2, cy0 = (minY + maxY) / 2;
+
+    const newNodes = data.nodes.map(n => {
+      const isExternal = n.data.external;
+      if (isExternal && cy.getElementById(n.data.id).length) return null;
+      if (cy.getElementById(n.data.id).length) return null;
+      const px = (n.position?.x || 0) - cx;
+      const py = (n.position?.y || 0) - cy0;
+      return {
+        ...n,
+        position: { x: clusterCenter.x + px, y: clusterCenter.y + py },
+      };
+    }).filter(Boolean);
+
+    const newEdges = data.edges.filter(e =>
+      cy.getElementById(e.data.id).length === 0
+    );
+
+    cy.batch(() => {
+      cy.add(newNodes);
+      cy.add(newEdges);
+      // Apply current edge-kind visibility to the freshly-added edges.
+      Object.keys(edgeColor).forEach(k => {
+        if (!defaultOn.has(k) && !edgeFilters.get(k)) {
+          cy.edges(`[kind="${k}"]`).style('display', 'none');
+        }
+      });
+    });
+    loadedRepos.set(repo, {
+      nodes: data.nodes.map(n => n.data.id),
+      edges: data.edges.map(e => e.data.id),
+    });
+    refreshLoadedList();
+
+    // Zoom to the new cluster so the user actually sees what loaded.
+    const added = cy.collection(newNodes.map(n => cy.getElementById(n.data.id))).filter(e => e.length);
+    if (added.length) {
+      cy.animate({ fit: { eles: added.union(cy.getElementById(repoNode.id())), padding: 80 }, duration: 400 });
+    }
+  }
+
+  function refreshLoadedList() {
+    const box = document.getElementById('loaded');
+    box.innerHTML = '';
+    if (loadedRepos.size === 0) {
+      box.innerHTML = '<div class="hint" style="padding: 4px 12px;">none yet</div>';
+      return;
+    }
+    [...loadedRepos.keys()].sort().forEach(repo => {
+      const row = document.createElement('div');
+      row.className = 'loaded-repo';
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = repo;
+      const close = document.createElement('button'); close.textContent = '×'; close.title = 'unload';
+      close.addEventListener('click', () => {
+        const ids = loadedRepos.get(repo);
+        if (!ids) return;
+        // Remove only nodes that are NOT shared by another loaded repo or by the overview.
+        const stillNeeded = new Set();
+        for (const [r, info] of loadedRepos) {
+          if (r === repo) continue;
+          info.nodes.forEach(id => stillNeeded.add(id));
+        }
+        ids.nodes.forEach(id => {
+          if (!stillNeeded.has(id) && cy.getElementById(id).data('kind') !== 'repo') {
+            cy.getElementById(id).remove();
+          }
+        });
+        ids.edges.forEach(id => cy.getElementById(id).remove());
+        loadedRepos.delete(repo);
+        refreshLoadedList();
+      });
+      row.append(name, close);
+      box.appendChild(row);
+    });
+  }
+  refreshLoadedList();
+
+  // ---------- side panel: outline lazy-load ----------
+  const side = document.getElementById('side');
+  cy.on('tap', 'node', async evt => {
+    const n = evt.target;
+    if (n.data('kind') === 'repo') {
+      const r = n.data('repo') || n.data('label');
+      const loaded = loadedRepos.has(r);
+      side.innerHTML = `<h3>${escape(r)}</h3>
+        <div class="meta">repo · ${loaded ? 'loaded' : 'not loaded yet'}<br><br>
+        ${loaded ? 'click a Module node inside this repo to see its outline.' : '<strong>double-click this repo node</strong> to load its modules, then click any module to see its outline.'}</div>`;
+      return;
+    }
+    if (n.data('kind') !== 'module' || !n.data('outline_key')) {
+      side.innerHTML = `<h3>${escape(n.data('label'))}</h3>
+        <div class="meta">${escape(n.data('kind'))} · ${escape(n.data('repo') || '')}<br>${escape(n.data('path') || '')}</div>`;
+      return;
+    }
+    const key = n.data('outline_key');
+    const repo = n.data('repo');
+    side.innerHTML = `<h3>${escape(n.data('label'))}</h3>
+      <div class="meta">${escape(repo)}<br>${escape(n.data('path'))}<br><em>loading outline…</em></div>`;
+    try {
+      const r = await fetch(`data/outline/${sanitize(repo)}/${key}.json`);
+      if (!r.ok) throw new Error(r.status);
+      const data = await r.json();
+      side.innerHTML = `<h3>${escape(n.data('label'))}</h3>
+        <div class="meta">${escape(repo)}<br>${escape(data.path)}<br>${data.language} · ${data.line_count} lines${data.parse_errors ? ` · ${data.parse_errors} parse errors` : ''}</div>
+        <div class="decl-tree" id="dt"></div>`;
+      const dt = document.getElementById('dt');
+      renderDecls(data.declarations || [], dt);
+    } catch (e) {
+      side.innerHTML += `<div class="meta">no outline available (${e.message || e})</div>`;
+    }
+  });
+
+  function renderDecls(decls, parent) {
+    decls.forEach(d => {
+      const row = document.createElement('div');
+      row.className = 'decl-line';
+      const k = document.createElement('span'); k.className = 'k';
+      k.textContent = d.kind || d.native_kind || '?';
+      const n = document.createElement('span'); n.className = 'n';
+      n.textContent = d.name || d.signature || '?';
+      const ln = document.createElement('span'); ln.className = 'ln';
+      if (d.start_line != null || d.end_line != null) {
+        ln.textContent = `${d.start_line ?? ''}–${d.end_line ?? ''}`;
+      }
+      row.append(k, n, ln);
+      parent.appendChild(row);
+      if (d.children && d.children.length) {
+        const child = document.createElement('div');
+        child.className = 'decl';
+        parent.appendChild(child);
+        renderDecls(d.children, child);
+      }
+    });
+  }
+
+  function getCss(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  function escape(s) {
+    return String(s ?? '').replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+  function sanitize(s) { return s.replace(/[^A-Za-z0-9_-]/g, '_'); }
+})();
+</script>
+</body>
+</html>

@@ -112,7 +112,7 @@ pub fn find_context(
     let mut search_ranked: Vec<(f32, Node)> = Vec::new();
     if let Some(search_store) = search {
         let qv = crate::search::embed::try_encode_query(task);
-        let hits = search_store
+        let (hits, _lane) = search_store
             .search_hybrid(task, SEARCH_CANDIDATE_K, qv.as_deref(), None)
             .unwrap_or_default();
         let mut seen_node_ids = std::collections::HashSet::new();

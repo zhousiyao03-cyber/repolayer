@@ -320,18 +320,23 @@ impl SearchStore {
     ///   `alpha` (None → auto-pick: 0.3 for symbol-like queries, 0.5 for NL).
     /// - If neither path produces hits, falls through to substring matching
     ///   so the user always gets something deterministic.
+    ///
+    /// The returned `lane` tells callers (and ultimately the agent reading
+    /// the output) which retrieval path produced these hits — important
+    /// because semantic-only or substring fallback results are often noisy
+    /// on bogus queries and shouldn't be trusted as confidently as fusion.
     pub fn search_hybrid(
         &self,
         query: &str,
         k: usize,
         query_embedding: Option<&[f32]>,
         alpha: Option<f32>,
-    ) -> Result<Vec<SearchHit>> {
+    ) -> Result<(Vec<SearchHit>, SearchLane)> {
         use crate::search::{bm25::Bm25Index, fusion, tokens::tokenize};
 
         let all = self.list_all_chunks()?;
         if all.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), SearchLane::Empty));
         }
 
         // Map from chunk_id (vec0 rowid) to position in `all`. BM25 indexes
@@ -359,11 +364,25 @@ impl SearchStore {
 
         // Optional dense path. We feed vec0 distances back through RRF after
         // converting position-id pairs into the same rank space as BM25.
+        //
+        // Threshold rationale: vec0 returns L2 distance on L2-normalised
+        // vectors. cos = 1 - d²/2, so a cosine floor of 0.4 (loose, "vaguely
+        // related") translates to d² ≤ 1.2, i.e. d ≤ ~1.095. Anything beyond
+        // that on a 256-dim potion-code embedding is statistical noise on
+        // bogus queries and always fills 10 slots regardless of relevance.
+        const DENSE_LOOSE_DIST_MAX: f32 = 1.10;
+        // Stricter floor (cosine ≥ 0.5) when BM25 produced *zero* hits — the
+        // query had no lexical anchor, so we need higher semantic confidence
+        // to avoid hallucinated top-K. d² ≤ 1.0 → d ≤ 1.0.
+        const DENSE_STRICT_DIST_MAX: f32 = 1.00;
         let mut sem_ranked: Vec<(u32, f32)> = Vec::new();
         if let Some(qv) = query_embedding {
             if self.embedding_count()? > 0 && qv.len() == DIM {
                 let neighbours = self.knn_search(qv, k * 4)?;
                 for (chunk_id, dist) in &neighbours {
+                    if *dist > DENSE_LOOSE_DIST_MAX {
+                        continue;
+                    }
                     if let Some(&pos) = id_to_pos.get(chunk_id) {
                         // vec0 returns L2 distance for normalised vectors;
                         // smaller is better. Convert to a similarity by
@@ -376,25 +395,42 @@ impl SearchStore {
 
         // Fuse only when both lanes had hits. Otherwise fall back to whichever
         // produced something.
-        let chosen: Vec<(u32, f32)> = if !sem_ranked.is_empty() && !bm25_ranked.is_empty() {
-            let alpha = fusion::resolve_alpha(query, alpha);
-            let sem_rrf = fusion::rrf_scores(&sem_ranked);
-            let bm_rrf = fusion::rrf_scores(&bm25_ranked);
-            let combined = fusion::combine(&sem_rrf, &bm_rrf, alpha);
-            let mut v: Vec<(u32, f32)> = combined.into_iter().collect();
-            v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            v.truncate(k);
-            v
-        } else if !bm25_ranked.is_empty() {
-            bm25_ranked.into_iter().take(k).collect()
-        } else if !sem_ranked.is_empty() {
-            sem_ranked.into_iter().take(k).collect()
-        } else {
-            // Last-resort substring match
-            return self.search_substring(query, k);
-        };
+        let (chosen, lane): (Vec<(u32, f32)>, SearchLane) =
+            if !sem_ranked.is_empty() && !bm25_ranked.is_empty() {
+                let alpha = fusion::resolve_alpha(query, alpha);
+                let sem_rrf = fusion::rrf_scores(&sem_ranked);
+                let bm_rrf = fusion::rrf_scores(&bm25_ranked);
+                let combined = fusion::combine(&sem_rrf, &bm_rrf, alpha);
+                let mut v: Vec<(u32, f32)> = combined.into_iter().collect();
+                v.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                v.truncate(k);
+                (v, SearchLane::Fusion)
+            } else if !bm25_ranked.is_empty() {
+                (
+                    bm25_ranked.into_iter().take(k).collect(),
+                    SearchLane::Bm25Only,
+                )
+            } else if !sem_ranked.is_empty() {
+                // No lexical anchor — apply the strict semantic floor so a
+                // gibberish query doesn't return its 10 closest random chunks.
+                // sem_ranked stores `-dist`, so "below the strict threshold"
+                // means score >= -DENSE_STRICT_DIST_MAX.
+                let strict: Vec<(u32, f32)> = sem_ranked
+                    .into_iter()
+                    .filter(|(_, neg_dist)| *neg_dist >= -DENSE_STRICT_DIST_MAX)
+                    .take(k)
+                    .collect();
+                if strict.is_empty() {
+                    let hits = self.search_substring(query, k)?;
+                    return Ok((hits, SearchLane::Substring));
+                }
+                (strict, SearchLane::SemanticOnly)
+            } else {
+                let hits = self.search_substring(query, k)?;
+                return Ok((hits, SearchLane::Substring));
+            };
 
-        let hits = chosen
+        let hits: Vec<SearchHit> = chosen
             .into_iter()
             .filter_map(|(pos, score)| {
                 let row = all.get(pos as usize)?;
@@ -409,7 +445,7 @@ impl SearchStore {
                 })
             })
             .collect();
-        Ok(hits)
+        Ok((hits, lane))
     }
 
     /// Case-insensitive substring search across all chunks.
@@ -452,6 +488,40 @@ pub struct SearchHit {
     pub end_line: u32,
     pub content: String,
     pub score: f32,
+}
+
+/// Which retrieval path produced a result set. The agent reads this to decide
+/// how much to trust the hits — fusion is the most reliable; substring is
+/// the last-resort tokenless fallback and frequently matches asset / lockfile
+/// chunks on bogus queries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchLane {
+    /// BM25 + dense both contributed; results were fused via RRF.
+    Fusion,
+    /// BM25 had hits but dense did not (or was filtered by the loose floor).
+    Bm25Only,
+    /// Dense had hits, BM25 did not. Already filtered by the strict cosine
+    /// floor — but with no lexical anchor the ranking can still be loose.
+    SemanticOnly,
+    /// Neither retrieval lane produced anything; chunks are returned by
+    /// case-insensitive substring match. Treat with skepticism.
+    Substring,
+    /// The chunk corpus was empty — no index has been built for this repo.
+    /// Also the default returned by `unwrap_or_default()` on errors.
+    #[default]
+    Empty,
+}
+
+impl SearchLane {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            SearchLane::Fusion => "fusion",
+            SearchLane::Bm25Only => "bm25_only",
+            SearchLane::SemanticOnly => "semantic_only",
+            SearchLane::Substring => "substring",
+            SearchLane::Empty => "empty",
+        }
+    }
 }
 
 /// Encode an `f32` slice as little-endian bytes for vec0. SQLite stores BLOBs

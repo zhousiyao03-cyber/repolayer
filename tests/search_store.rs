@@ -158,9 +158,10 @@ fn hybrid_bm25_only_finds_keyword_match() {
     )
     .unwrap();
 
-    let hits = s.search_hybrid("authenticate", 5, None, None).unwrap();
+    let (hits, lane) = s.search_hybrid("authenticate", 5, None, None).unwrap();
     assert!(!hits.is_empty(), "expected BM25-only path to return matches");
     assert_eq!(hits[0].path, "a.rs", "best match should be a.rs");
+    assert_eq!(lane, repolayer::search::store::SearchLane::Bm25Only);
 }
 
 #[test]
@@ -175,7 +176,7 @@ fn hybrid_substring_fallback_when_no_signal() {
     )
     .unwrap();
 
-    let hits = s.search_hybrid("markup_block_42", 5, None, None).unwrap();
+    let (hits, _lane) = s.search_hybrid("markup_block_42", 5, None, None).unwrap();
     // Should match either via BM25 (single token) or substring fallback;
     // either path returns a hit.
     assert_eq!(hits.len(), 1);
@@ -203,8 +204,9 @@ fn hybrid_with_query_embedding_uses_dense_signal() {
     // unit_vec(0) makes dense prefer chunk 1. With alpha=0.5 RRF will
     // tie them, but both should be in the result set.
     let qv = unit_vec(0);
-    let hits = s.search_hybrid("delta", 5, Some(&qv), Some(0.5)).unwrap();
+    let (hits, lane) = s.search_hybrid("delta", 5, Some(&qv), Some(0.5)).unwrap();
     let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
     assert!(ids.contains(&1), "expected dense-favoured chunk 1 in {ids:?}");
     assert!(ids.contains(&2), "expected BM25-favoured chunk 2 in {ids:?}");
+    assert_eq!(lane, repolayer::search::store::SearchLane::Fusion);
 }

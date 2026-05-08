@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>repolayer · file dependency graph</title>
+<style>
+  :root { --bg:#0e1116; --panel:#161b22; --border:#30363d; --fg:#c9d1d9; --fg-dim:#8b949e; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+              font-size: 13px; }
+  #app { display: grid; grid-template-rows: 48px 1fr; height: 100vh; }
+  .toolbar { background: var(--panel); border-bottom: 1px solid var(--border);
+             display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+  .toolbar select, .toolbar input { background: #0d1117; border: 1px solid var(--border);
+                                    color: var(--fg); padding: 4px 8px; border-radius: 4px; outline: none; }
+  .toolbar .stats { color: var(--fg-dim); font-size: 11px; margin-left: auto; }
+  #cy { background: #0d1117;
+        background-image: radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px);
+        background-size: 16px 16px; }
+  #status { position: absolute; bottom: 12px; left: 12px; background: var(--panel);
+            border: 1px solid var(--border); padding: 6px 10px; border-radius: 4px;
+            font-size: 11px; color: var(--fg-dim); }
+  a { color: #58a6ff; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="toolbar">
+    <span><a href="index.html">← back</a></span>
+    <label>repo: <select id="repo"></select></label>
+    <label>filter: <input id="q" type="search" placeholder="path…"></label>
+    <span class="stats" id="stats">loading…</span>
+  </header>
+  <main id="cy">
+    <div id="status">loading…</div>
+  </main>
+</div>
+<script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+<script src="https://unpkg.com/cytoscape-fcose@2.2.0/cytoscape-fcose.js"></script>
+<script>
+(async () => {
+  const status = document.getElementById('status');
+  const stats = document.getElementById('stats');
+  const repoSel = document.getElementById('repo');
+
+  let data;
+  try { data = await fetch('data/deps.json').then(r => r.json()); }
+  catch (e) {
+    status.textContent = 'cannot fetch data/deps.json — open this page via a local server.';
+    return;
+  }
+
+  const repos = Object.keys(data).sort();
+  if (!repos.length) { status.textContent = 'deps.db has no edges'; return; }
+  repos.forEach(r => {
+    const o = document.createElement('option'); o.value = r; o.textContent = r;
+    repoSel.appendChild(o);
+  });
+
+  let cy = null;
+  function render(repo) {
+    if (cy) cy.destroy();
+    const els = data[repo];
+    stats.textContent = `${els.nodes.length} files · ${els.edges.length} edges`;
+    status.textContent = 'rendering…';
+    cy = cytoscape({
+      container: document.getElementById('cy'),
+      elements: [...els.nodes, ...els.edges],
+      minZoom: 0.05, maxZoom: 4,
+      style: [
+        { selector: 'node',
+          style: {
+            'label': 'data(label)',
+            'color': '#c9d1d9',
+            'font-size': 8,
+            'text-valign': 'center', 'text-halign': 'center',
+            'text-outline-color': '#0d1117', 'text-outline-width': 2,
+            'background-color': '#58a6ff',
+            'width': 10, 'height': 10,
+          }},
+        { selector: 'edge',
+          style: {
+            'curve-style': 'bezier',
+            'width': 1, 'line-color': '#6e7681',
+            'target-arrow-color': '#6e7681', 'target-arrow-shape': 'triangle',
+            'arrow-scale': 0.6, 'opacity': 0.5,
+          }},
+        { selector: 'node:selected', style: { 'border-width': 3, 'border-color': '#fff' } },
+        { selector: '.dim', style: { opacity: 0.06 } },
+      ],
+      layout: {
+        name: 'fcose', animate: false, randomize: true,
+        nodeRepulsion: 2500, idealEdgeLength: 50, packComponents: true,
+      },
+    });
+    cy.ready(() => {
+      status.textContent = `${cy.nodes().length} files · ${cy.edges().length} edges`;
+    });
+  }
+
+  repoSel.addEventListener('change', () => render(repoSel.value));
+  render(repos[0]);
+
+  document.getElementById('q').addEventListener('input', e => {
+    if (!cy) return;
+    const q = e.target.value.trim().toLowerCase();
+    if (!q) { cy.elements().removeClass('dim'); return; }
+    cy.batch(() => {
+      cy.elements().addClass('dim');
+      const hit = cy.nodes().filter(n => (n.data('path') || '').toLowerCase().includes(q));
+      hit.removeClass('dim');
+      hit.connectedEdges().removeClass('dim');
+      hit.connectedEdges().connectedNodes().removeClass('dim');
+    });
+  });
+})();
+</script>
+</body>
+</html>

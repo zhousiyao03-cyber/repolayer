@@ -18,8 +18,10 @@ description: |
 二进制：`which repolayer`。
 
 **索引位置**：默认从当前 cwd 找 `.repolayer/`。如果设了环境变量 `REPOLAYER_INDEX=<dir>`，
-查询类命令（`query` / `search` / `find-related` / `view`）会改从该目录读索引——
-适合"在业务仓里编辑代码、但用集中式工作区做跨仓查询"的工作流。
+查询类命令里**只读索引、不读源文件**的那几条（`query` / `search` / `find-related` / `view`）
+会改从该目录读索引——适合"在业务仓里编辑代码、但用集中式工作区做跨仓查询"的工作流。
+其余读源文件的命令（`outline` / `show` / `digest` / `surface` / `deps` / `reverse-deps` /
+`cycles`）仍然以 cwd 为锚解析相对路径，需要先 `cd` 到目标仓。
 写索引的命令（`build` / `update` / `init`）始终绑定 cwd，避免误写。
 
 如果 `.repolayer/` 不存在或 `repolayer.yml` 没配置，所有查询命令会报
@@ -42,12 +44,31 @@ description: |
 | 找跟 X:line 相似的代码块 | `repolayer find-related <file>:<line>` |
 | 工作区有 import 循环吗 | `repolayer cycles` |
 
+**⚠️ cwd 规则（v0.2 实际行为）**：
+
+- 走 `$REPOLAYER_INDEX` 全局索引、**不挑 cwd** 的命令：`query` / `search`。
+  这两条只读 `index.db` / `search.db`，路径在索引里已是绝对/带 repo 前缀，
+  在任何目录下都能直接调用（包括 `~`、`/tmp`、`code/repolayer` 等）。
+- **必须 cwd 在目标仓里**的命令：`outline` / `show` / `digest` / `surface` /
+  `deps` / `reverse-deps` / `find-related` / `cycles`。这些要读源文件本身，
+  接受的是相对路径。在错误目录下会报 `path not found` 或 `no adapter for ...`。
+  正确做法：先从 `query` / `search` 结果里拿到绝对路径，再 `cd <repo-root>` 后调用。
+  注意 hook 会在每条 Bash 命令后把 cwd reset 回 session 起始目录，所以**每次都要拼**
+  `cd /Users/bytedance/<repo> && repolayer outline biz/handler/x.go`，不能依赖前一条 `cd`。
+
 **追接口/IDL 全链路的标准动作**：
 
 ```
-repolayer query "<MethodName>"   # 一次拿到：handler 多个仓 + IDL 定义（http_idl/rpc_idl）+ TS stubs + router
-repolayer outline <handler.go>   # 看主 handler 文件结构
-repolayer show <handler.go> <Method>  # 看主入口实现
+# Step 1：在任何目录下，一次拿到全链路节点
+repolayer query "<MethodName>"
+# 结果包含：handler 多个仓 + IDL 定义（http_idl/rpc_idl）+ TS stubs + router 入口
+
+# Step 2：根据上一步的 repo + path，cd 进对应仓再 outline / show
+cd /Users/bytedance/<be-repo> && repolayer outline biz/handler/<file>.go
+cd /Users/bytedance/<be-repo> && repolayer show biz/handler/<file>.go <Method>
+
+# Step 3（可选）：URL 反查前端调用方
+repolayer search "/api/v1/<path>"
 ```
 
 **不要**为了找 IDL 定义专门 `find ... -name "*.proto" | xargs grep`——`query` 已经包含

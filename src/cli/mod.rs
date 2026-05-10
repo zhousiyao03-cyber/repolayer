@@ -3,7 +3,9 @@ use clap::Subcommand;
 use std::path::PathBuf;
 
 pub mod build;
+pub mod callers;
 pub mod compat;
+pub mod find_idl_impl;
 pub mod init;
 pub mod install;
 pub mod query;
@@ -27,6 +29,42 @@ pub enum Command {
         /// Restrict matches to a single repo (must match a name in repolayer.yml)
         #[arg(long)]
         repo: Option<String>,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Find inbound `Calls` edges for a symbol — i.e. who calls it.
+    /// Aggregates across all definitions of the exact name (handy when a
+    /// symbol like `init` is defined in multiple repos).
+    Callers {
+        /// Exact symbol name (no substring match — use `query` first if unsure)
+        symbol: String,
+        /// BFS depth over the Calls edge (1 = direct callers only)
+        #[arg(long, default_value_t = 1)]
+        depth: usize,
+        /// Restrict definitions to a single repo (must match a name in repolayer.yml)
+        #[arg(long)]
+        repo: Option<String>,
+        /// Emit JSON instead of human-readable text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Resolve an IDL method to its server implementations (Implements) and
+    /// client invocations (Invokes) across all indexed repos. Output is
+    /// sorted by edge confidence — higher means stronger evidence.
+    #[command(name = "find-idl-impl")]
+    FindIdlImpl {
+        /// IDL method name (e.g. `GetMember`)
+        method: String,
+        /// Disambiguate by IDL service name (e.g. `MemberService`)
+        #[arg(long)]
+        service: Option<String>,
+        /// Skip Implements (server-side) edges
+        #[arg(long)]
+        no_implements: bool,
+        /// Skip Invokes (client-side) edges
+        #[arg(long)]
+        no_invokes: bool,
         /// Emit JSON instead of human-readable text
         #[arg(long)]
         json: bool,
@@ -148,8 +186,25 @@ pub async fn run(cmd: Command) -> Result<()> {
         Command::Build => build::run().await,
         Command::Update => update::run().await,
         Command::Query { text, repo, json } => query::run(text, repo, json).await,
+        Command::Callers {
+            symbol,
+            depth,
+            repo,
+            json,
+        } => callers::run(symbol, depth, repo, json).await,
+        Command::FindIdlImpl {
+            method,
+            service,
+            no_implements,
+            no_invokes,
+            json,
+        } => find_idl_impl::run(method, service, no_implements, no_invokes, json).await,
         Command::Outline { paths, json } => compat::outline::run(paths, json).await,
-        Command::Show { file, symbols, json } => compat::show::run(file, symbols, json).await,
+        Command::Show {
+            file,
+            symbols,
+            json,
+        } => compat::show::run(file, symbols, json).await,
         Command::Digest { paths, json } => compat::digest::run(paths, json).await,
         Command::Surface { path, json } => {
             let p = path.unwrap_or_else(|| PathBuf::from("."));

@@ -113,6 +113,21 @@ impl Indexer {
         let idl_edges = linker.link_all()?;
         stats.edges += idl_edges;
 
+        // CallsLinker: Module→Function/Method Calls edges via ast-grep.
+        // Only links callee names that resolve to exactly one Function/Method
+        // node workspace-wide, so confidence is 1.0 by construction.
+        let calls_linker = crate::linker::calls::CallsLinker {
+            store: &self.store,
+            repos: code_repos.clone(),
+        };
+        match calls_linker.link_all() {
+            Ok(n) => {
+                info!("calls: {} unique-resolution Calls edges", n);
+                stats.edges += n;
+            }
+            Err(e) => warn!("calls linker failed: {}", e),
+        }
+
         // imports_to_repo: high-confidence Imports edges from real Go module
         // imports (deps.db.external_imports → matching workspace repo).
         match crate::linker::imports_to_repo::link(

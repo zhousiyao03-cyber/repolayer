@@ -1,8 +1,11 @@
-use assert_cmd::Command;
 use repolayer::graph::model::*;
 use repolayer::graph::store::Store;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 /// Build a tiny indexed workspace, then inject Calls edges directly into the
 /// graph store. Calls edges are not yet auto-extracted by the indexer, so
@@ -31,8 +34,7 @@ fn build_workspace_with_calls() -> tempfile::TempDir {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(workspace.path())
         .arg("build")
@@ -77,8 +79,7 @@ fn build_workspace_with_calls() -> tempfile::TempDir {
 fn callers_lists_inbound_calls_edges() {
     let ws = build_workspace_with_calls();
 
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["callers", "hash", "--json"])
@@ -105,8 +106,7 @@ fn callers_lists_inbound_calls_edges() {
 #[test]
 fn callers_human_output_shows_definition_and_callers() {
     let ws = build_workspace_with_calls();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["callers", "hash"])
@@ -125,8 +125,7 @@ fn callers_human_output_shows_definition_and_callers() {
 #[test]
 fn callers_no_match_emits_friendly_fallback() {
     let ws = build_workspace_with_calls();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["callers", "nonexistent_xyz"])
@@ -143,8 +142,7 @@ fn callers_no_inbound_edges_explains_absence() {
     // hash is defined and has callers in our injected fixture, but `login`
     // itself has no inbound Calls — verify the "no callers" explainer.
     let ws = build_workspace_with_calls();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["callers", "login"])
@@ -159,8 +157,7 @@ fn callers_no_inbound_edges_explains_absence() {
 #[test]
 fn callers_repo_filter_validates_unknown_repo() {
     let ws = build_workspace_with_calls();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["callers", "hash", "--repo", "wrong_name"])
@@ -198,8 +195,7 @@ fn callers_aggregates_across_same_named_definitions() {
         "repos:\n  - { name: alpha, path: ./repo_a }\n  - { name: beta, path: ./repo_b }\n",
     )
     .unwrap();
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(workspace.path())
         .arg("build")
@@ -237,8 +233,7 @@ fn callers_aggregates_across_same_named_definitions() {
     }
     drop(store);
 
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(workspace.path())
         .args(["callers", "bootstrapXyz", "--json"])

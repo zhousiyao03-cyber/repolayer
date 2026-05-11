@@ -1,7 +1,10 @@
-use assert_cmd::Command;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 #[test]
 fn build_creates_db_with_nodes_and_edges() {
@@ -17,7 +20,7 @@ fn build_creates_db_with_nodes_and_edges() {
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("repolayer").unwrap();
+    let mut cmd = repolayer_cmd();
     cmd.current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -71,8 +74,7 @@ fn build_counts_contains_edges_in_stats() {
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .output()
@@ -119,8 +121,7 @@ fn build_does_not_leave_orphan_module_nodes() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()

@@ -1,7 +1,10 @@
-use assert_cmd::Command;
 use std::fs;
 use std::process::Command as Std;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 #[test]
 fn update_reindexes_only_changed_files() {
@@ -40,8 +43,7 @@ fn update_reindexes_only_changed_files() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -54,8 +56,7 @@ fn update_reindexes_only_changed_files() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("update")
         .assert()
@@ -92,16 +93,14 @@ fn update_handles_no_git_repo_gracefully() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
         .success();
 
     // update should not panic, just skip the non-git repo
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("update")
         .assert()
@@ -149,8 +148,7 @@ fn update_removes_deleted_symbols() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -159,8 +157,7 @@ fn update_removes_deleted_symbols() {
     // remove gamma
     fs::write(repo.join("src/a.ts"), "export function alpha() {}").unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("update")
         .assert()

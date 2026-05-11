@@ -1,7 +1,10 @@
-use assert_cmd::Command;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 // ---------------------------------------------------------------------------
 // CLI tests
@@ -13,8 +16,7 @@ fn outline_command_emits_signatures_for_rust_file() {
     let f = dir.path().join("foo.rs");
     fs::write(&f, "pub fn add(a: i32, b: i32) -> i32 { a + b }\n").unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .arg("outline")
         .arg(&f)
         .assert()
@@ -29,12 +31,7 @@ fn outline_command_shows_function_signature() {
     let f = dir.path().join("math.rs");
     fs::write(&f, "pub fn multiply(x: i32, y: i32) -> i32 { x * y }\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
-        .arg("outline")
-        .arg(&f)
-        .output()
-        .unwrap();
+    let output = repolayer_cmd().arg("outline").arg(&f).output().unwrap();
 
     assert!(output.status.success(), "outline command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -52,8 +49,7 @@ fn outline_json_flag_emits_valid_json() {
     let f = dir.path().join("foo.rs");
     fs::write(&f, "pub fn add() -> i32 { 0 }\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("outline")
         .arg("--json")
         .arg(&f)
@@ -86,8 +82,7 @@ fn outline_json_output_contains_language_field() {
     let f = dir.path().join("bar.rs");
     fs::write(&f, "pub struct Foo { x: i32 }\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("outline")
         .arg("--json")
         .arg(&f)
@@ -111,8 +106,7 @@ fn outline_directory_walks_all_supported_files() {
     fs::write(subdir.join("a.rs"), "pub fn a() {}\n").unwrap();
     fs::write(subdir.join("b.rs"), "pub fn b() {}\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("outline")
         .arg(dir.path())
         .output()
@@ -131,8 +125,7 @@ fn outline_unknown_extension_warns_but_succeeds() {
     let f = dir.path().join("data.xyz");
     fs::write(&f, "some unknown content\n").unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .arg("outline")
         .arg(&f)
         .assert()
@@ -150,12 +143,7 @@ fn outline_typescript_file_includes_function() {
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
-        .arg("outline")
-        .arg(&f)
-        .output()
-        .unwrap();
+    let output = repolayer_cmd().arg("outline").arg(&f).output().unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);

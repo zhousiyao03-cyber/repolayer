@@ -22,6 +22,10 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// (repo, path) → outline key. Returned by `export_outlines` and consumed by
+/// `export_main_graph` to wire graph nodes to their per-file outline JSON.
+type OutlineIndex = HashMap<(String, String), String>;
+
 const GRAPH_HTML: &str = include_str!("../../assets/view/graph.html");
 const DEPS_HTML: &str = include_str!("../../assets/view/deps.html");
 const INDEX_HTML: &str = include_str!("../../assets/view/index.html");
@@ -44,11 +48,10 @@ pub async fn run(out: PathBuf, repo_filter: Option<String>) -> Result<()> {
         cfg.repos
             .iter()
             .filter_map(|r| {
-                let name = r.name.clone().or_else(|| {
-                    r.path
-                        .file_name()
-                        .map(|s| s.to_string_lossy().into_owned())
-                })?;
+                let name = r
+                    .name
+                    .clone()
+                    .or_else(|| r.path.file_name().map(|s| s.to_string_lossy().into_owned()))?;
                 Some((name, r.path.clone()))
             })
             .collect()
@@ -93,7 +96,12 @@ pub async fn run(out: PathBuf, repo_filter: Option<String>) -> Result<()> {
         dep_stats.nodes, dep_stats.edges, dep_stats.repos
     );
 
-    write_repos_json(&data_dir.join("repos.json"), &stats, &dep_stats, outline_stats)?;
+    write_repos_json(
+        &data_dir.join("repos.json"),
+        &stats,
+        &dep_stats,
+        outline_stats,
+    )?;
 
     fs::write(out.join("graph.html"), GRAPH_HTML)?;
     fs::write(out.join("deps.html"), DEPS_HTML)?;
@@ -120,7 +128,6 @@ struct DepStats {
     per_repo: HashMap<String, (usize, usize)>,
 }
 
-
 /// Two-tier export so the browser never has to load 18MB up front:
 ///
 ///   data/overview.json     —— all Repo nodes + edges aggregated to repo→repo
@@ -136,7 +143,7 @@ fn export_main_graph(
     db: &Path,
     data_dir: &Path,
     repo_filter: Option<&str>,
-    outline_index: &HashMap<(String, String), String>,
+    outline_index: &OutlineIndex,
 ) -> Result<GraphStats> {
     let conn = Connection::open(db)?;
 
@@ -186,9 +193,8 @@ fn export_main_graph(
                 svc_by_loc.insert((repo.clone(), path.clone()), id.clone());
             }
         }
-        let mut mstmt = conn.prepare(
-            "SELECT id, repo, path FROM nodes WHERE kind = 'idlmethod'",
-        )?;
+        let mut mstmt =
+            conn.prepare("SELECT id, repo, path FROM nodes WHERE kind = 'idlmethod'")?;
         let mrows = mstmt
             .query_map([], |row| {
                 Ok((
@@ -253,8 +259,12 @@ fn export_main_graph(
         if !edge_seen.insert(key) {
             continue;
         }
-        let Some(repo_a) = id_to_repo.get(&from_folded) else { continue; };
-        let Some(repo_b) = id_to_repo.get(&to_folded) else { continue; };
+        let Some(repo_a) = id_to_repo.get(&from_folded) else {
+            continue;
+        };
+        let Some(repo_b) = id_to_repo.get(&to_folded) else {
+            continue;
+        };
         if let Some(f) = repo_filter {
             if repo_a != f && repo_b != f {
                 continue;
@@ -268,7 +278,10 @@ fn export_main_graph(
         let edge = (from_folded.clone(), to_folded.clone(), kind.clone(), conf);
         // Both endpoints' repo subgraphs need this edge so a cross-repo edge
         // shows up no matter which side the user is looking at.
-        per_repo_edges.entry(repo_a.clone()).or_default().push(edge.clone());
+        per_repo_edges
+            .entry(repo_a.clone())
+            .or_default()
+            .push(edge.clone());
         if repo_b != repo_a {
             per_repo_edges.entry(repo_b.clone()).or_default().push(edge);
         }
@@ -286,7 +299,10 @@ fn export_main_graph(
     }
     let mut sorted_repos: Vec<String> = repos_set.iter().cloned().collect();
     sorted_repos.sort_by(|a, b| {
-        degree.get(b).copied().unwrap_or(0)
+        degree
+            .get(b)
+            .copied()
+            .unwrap_or(0)
             .cmp(&degree.get(a).copied().unwrap_or(0))
             .then_with(|| a.cmp(b))
     });
@@ -295,8 +311,9 @@ fn export_main_graph(
     // Center: top 2 hubs (or 1 if very few repos). Outer rings: rest.
     let n_hubs = if n > 6 { 2 } else { 1.min(n) };
     let outer_count = n.saturating_sub(n_hubs);
-    let outer_pitch: f32 = 90.0;          // circumference spacing per node
-    let outer_radius = ((outer_count as f32 * outer_pitch) / (2.0 * std::f32::consts::PI)).max(400.0);
+    let outer_pitch: f32 = 90.0; // circumference spacing per node
+    let outer_radius =
+        ((outer_count as f32 * outer_pitch) / (2.0 * std::f32::consts::PI)).max(400.0);
 
     let overview_node_values: Vec<serde_json::Value> = sorted_repos
         .iter()
@@ -315,7 +332,10 @@ fn export_main_graph(
                 let theta = (j as f32 / outer_count.max(1) as f32) * 2.0 * std::f32::consts::PI;
                 (outer_radius * theta.cos(), outer_radius * theta.sin())
             };
-            let id = repo_node_id.get(r).cloned().unwrap_or_else(|| format!("repo:{r}"));
+            let id = repo_node_id
+                .get(r)
+                .cloned()
+                .unwrap_or_else(|| format!("repo:{r}"));
             serde_json::json!({
                 "data": {
                     "id": id, "label": r, "kind": "repo", "repo": r,
@@ -385,7 +405,9 @@ fn export_main_graph(
 
         let mut nodes_json: Vec<serde_json::Value> = Vec::new();
         for (i, id) in local_sorted.iter().enumerate() {
-            let Some((kind, r, path, symbol)) = node_meta.get(*id) else { continue; };
+            let Some((kind, r, path, symbol)) = node_meta.get(*id) else {
+                continue;
+            };
             let x = (i % inner_cols) as f32 * inner_pitch;
             let y = (i / inner_cols) as f32 * inner_pitch;
             let label = if kind == "module" {
@@ -497,9 +519,7 @@ fn export_main_graph(
 
 fn export_deps_graph(db: &Path, data_dir: &Path, repo_filter: Option<&str>) -> Result<DepStats> {
     let conn = Connection::open(db)?;
-    let mut stmt = conn.prepare(
-        "SELECT repo, from_path, to_path, edge_kind FROM forward_edges",
-    )?;
+    let mut stmt = conn.prepare("SELECT repo, from_path, to_path, edge_kind FROM forward_edges")?;
     let rows = stmt
         .query_map([], |row| {
             Ok((
@@ -598,7 +618,9 @@ fn export_deps_graph(db: &Path, data_dir: &Path, repo_filter: Option<&str>) -> R
             .collect();
         stats.nodes += nodes.len();
         stats.edges += edge_vals.len();
-        stats.per_repo.insert(repo.clone(), (nodes.len(), edge_vals.len()));
+        stats
+            .per_repo
+            .insert(repo.clone(), (nodes.len(), edge_vals.len()));
         let path = deps_dir.join(format!("{}.json", sanitize(repo)));
         fs::write(
             &path,
@@ -628,7 +650,7 @@ fn export_outlines(
     out_dir: &Path,
     repo_filter: Option<&str>,
     repo_roots: &HashMap<String, PathBuf>,
-) -> Result<(usize, HashMap<(String, String), String>)> {
+) -> Result<(usize, OutlineIndex)> {
     let conn = Connection::open(db)?;
     let mut stmt = conn.prepare(
         "SELECT repo, path, language, line_count, parse_errors, declarations FROM files",
@@ -647,7 +669,7 @@ fn export_outlines(
         .collect::<rusqlite::Result<Vec<_>>>()?;
 
     let mut count = 0usize;
-    let mut index: HashMap<(String, String), String> = HashMap::new();
+    let mut index: OutlineIndex = HashMap::new();
     for (repo, abs_path, language, line_count, parse_errors, decls_json) in rows {
         if let Some(f) = repo_filter {
             if repo != f {
@@ -675,18 +697,16 @@ fn export_outlines(
             "parse_errors": parse_errors,
             "declarations": serde_json::from_str::<serde_json::Value>(&decls_json).unwrap_or(serde_json::Value::Null),
         });
-        fs::write(repo_subdir.join(format!("{}.json", key)), payload.to_string())?;
+        fs::write(
+            repo_subdir.join(format!("{}.json", key)),
+            payload.to_string(),
+        )?;
         count += 1;
     }
     Ok((count, index))
 }
 
-fn write_repos_json(
-    out: &Path,
-    g: &GraphStats,
-    d: &DepStats,
-    outline_count: usize,
-) -> Result<()> {
+fn write_repos_json(out: &Path, g: &GraphStats, d: &DepStats, outline_count: usize) -> Result<()> {
     let payload = serde_json::json!({
         "graph": {
             "overview_nodes": g.overview_nodes,
@@ -720,6 +740,12 @@ fn outline_key(repo: &str, path: &str) -> String {
 
 fn sanitize(name: &str) -> String {
     name.chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }

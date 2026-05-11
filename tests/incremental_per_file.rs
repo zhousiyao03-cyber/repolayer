@@ -2,17 +2,36 @@
 //! granularity — i.e. files that didn't change keep their original chunk ids
 //! and forward edges, only the changed file is touched.
 
-use assert_cmd::Command;
 use std::fs;
 use std::process::Command as Std;
 use tempfile::tempdir;
 
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
+
 fn git_init_commit(repo: &std::path::Path) {
-    Std::new("git").current_dir(repo).args(["init", "-q"]).status().unwrap();
-    Std::new("git").current_dir(repo).args(["add", "."]).status().unwrap();
     Std::new("git")
         .current_dir(repo)
-        .args(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"])
+        .args(["init", "-q"])
+        .status()
+        .unwrap();
+    Std::new("git")
+        .current_dir(repo)
+        .args(["add", "."])
+        .status()
+        .unwrap();
+    Std::new("git")
+        .current_dir(repo)
+        .args([
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "user.name=t",
+            "commit",
+            "-qm",
+            "init",
+        ])
         .status()
         .unwrap();
 }
@@ -45,8 +64,7 @@ fn update_keeps_chunk_ids_for_unchanged_files() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -75,8 +93,7 @@ fn update_keeps_chunk_ids_for_unchanged_files() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("update")
         .assert()
@@ -130,8 +147,7 @@ fn update_clears_dangling_chunk_vec_for_deleted_file() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -140,8 +156,7 @@ fn update_clears_dangling_chunk_vec_for_deleted_file() {
     // Delete b.ts on disk.
     fs::remove_file(repo.join("src/b.ts")).unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("update")
         .assert()
@@ -183,8 +198,11 @@ fn update_refreshes_deps_for_changed_file_only() {
     let workspace = tempdir().unwrap();
     let repo = workspace.path().join("repo");
     fs::create_dir_all(repo.join("src")).unwrap();
-    fs::write(repo.join("src/a.ts"), "import { beta } from './b';\nexport const x = beta();\n")
-        .unwrap();
+    fs::write(
+        repo.join("src/a.ts"),
+        "import { beta } from './b';\nexport const x = beta();\n",
+    )
+    .unwrap();
     fs::write(repo.join("src/b.ts"), "export const beta = () => 1;\n").unwrap();
     fs::write(repo.join("package.json"), r#"{"name":"r"}"#).unwrap();
     git_init_commit(&repo);
@@ -195,8 +213,7 @@ fn update_refreshes_deps_for_changed_file_only() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -212,13 +229,15 @@ fn update_refreshes_deps_for_changed_file_only() {
         )
         .unwrap()
     };
-    assert!(edges_before >= 1, "a.ts should have ≥1 outgoing edge before edit");
+    assert!(
+        edges_before >= 1,
+        "a.ts should have ≥1 outgoing edge before edit"
+    );
 
     // Drop the import in a.ts.
     fs::write(repo.join("src/a.ts"), "export const x = 42;\n").unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("update")
         .assert()

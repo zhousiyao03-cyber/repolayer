@@ -1,9 +1,12 @@
 /// Integration test: `repolayer build` must write all 4 SQLite stores under
 /// `.repolayer/` and populate them with data from a TypeScript fixture repo.
-use assert_cmd::Command;
 use rusqlite::Connection;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
@@ -33,8 +36,7 @@ fn build_writes_all_4_sqlite_stores() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -90,7 +92,11 @@ fn build_writes_all_4_sqlite_stores() {
         .conn()
         .query_row("SELECT COUNT(*) FROM chunks", [], |r| r.get(0))
         .unwrap();
-    assert!(chunks >= 1, "expected ≥1 chunk in search.db, got {}", chunks);
+    assert!(
+        chunks >= 1,
+        "expected ≥1 chunk in search.db, got {}",
+        chunks
+    );
 
     // chunk_vec virtual table must exist
     let vec_table_count: i64 = store4
@@ -101,16 +107,17 @@ fn build_writes_all_4_sqlite_stores() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(
-        vec_table_count, 1,
-        "chunk_vec virtual table missing"
-    );
+    assert_eq!(vec_table_count, 1, "chunk_vec virtual table missing");
 
-    // Default behaviour: REPOLAYER_DOWNLOAD not set → no embeddings written.
-    assert_eq!(
-        store4.embedding_count().unwrap(),
-        0,
-        "expected 0 embeddings without REPOLAYER_DOWNLOAD=1"
+    // Default behaviour: REPOLAYER_DOWNLOAD not set. The embed step is allowed
+    // to run only if the model is already cached locally (cache hit avoids the
+    // network). Without a cache hit, embedding must be skipped. We can't tell
+    // from inside the test whether the runner has a cache, so accept both:
+    // 0 (clean CI) or N>0 (developer with cached model).
+    let embeds = store4.embedding_count().unwrap();
+    assert!(
+        embeds == 0 || embeds == chunks,
+        "embedding_count should be 0 (no cache) or match chunks ({chunks}), got {embeds}"
     );
 }
 
@@ -133,8 +140,7 @@ fn build_with_no_download_succeeds() {
     let empty_cache = workspace.path().join("empty-cache");
     fs::create_dir_all(&empty_cache).unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .env("REPOLAYER_NO_DOWNLOAD", "1")
         .env("AST_OUTLINE_MODEL_DIR", &empty_cache)

@@ -1,15 +1,14 @@
-use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 #[test]
 fn deps_runs_on_simple_workspace() {
     let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("repolayer.yml"),
-        "repos:\n  - path: ./\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("repolayer.yml"), "repos:\n  - path: ./\n").unwrap();
     fs::create_dir_all(dir.path().join("src")).unwrap();
     fs::write(dir.path().join("src/foo.ts"), "export const x = 1;\n").unwrap();
     fs::write(
@@ -23,8 +22,7 @@ fn deps_runs_on_simple_workspace() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(dir.path())
         .arg("deps")
         .arg("src/bar.ts")
@@ -35,26 +33,17 @@ fn deps_runs_on_simple_workspace() {
 #[test]
 fn deps_json_flag_produces_valid_json() {
     let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("repolayer.yml"),
-        "repos:\n  - path: ./\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("repolayer.yml"), "repos:\n  - path: ./\n").unwrap();
     fs::create_dir_all(dir.path().join("src")).unwrap();
     fs::write(dir.path().join("src/a.ts"), "export const a = 1;\n").unwrap();
-    fs::write(
-        dir.path().join("src/b.ts"),
-        "import { a } from './a';\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("src/b.ts"), "import { a } from './a';\n").unwrap();
     fs::write(
         dir.path().join("package.json"),
         r#"{"name":"test2","version":"0.0.1"}"#,
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .current_dir(dir.path())
         .arg("deps")
         .arg("src/b.ts")
@@ -62,10 +51,13 @@ fn deps_json_flag_produces_valid_json() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let v: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("stdout should be valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be valid JSON");
     assert_eq!(v["schema_version"], "ast-outline.deps.v1");
     assert!(v["edges"].is_array());
 }
@@ -73,11 +65,7 @@ fn deps_json_flag_produces_valid_json() {
 #[test]
 fn deps_no_deps_exits_ok() {
     let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("repolayer.yml"),
-        "repos:\n  - path: ./\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("repolayer.yml"), "repos:\n  - path: ./\n").unwrap();
     fs::create_dir_all(dir.path().join("src")).unwrap();
     fs::write(dir.path().join("src/isolated.ts"), "export const z = 42;\n").unwrap();
     fs::write(
@@ -87,8 +75,7 @@ fn deps_no_deps_exits_ok() {
     .unwrap();
 
     // Even when there are no deps the command should succeed.
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(dir.path())
         .arg("deps")
         .arg("src/isolated.ts")

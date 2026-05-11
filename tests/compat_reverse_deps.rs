@@ -1,17 +1,20 @@
-use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 #[test]
 fn reverse_deps_runs_on_simple_workspace() {
     let dir = tempdir().unwrap();
+    fs::write(dir.path().join("repolayer.yml"), "repos:\n  - path: ./\n").unwrap();
+    fs::create_dir_all(dir.path().join("src")).unwrap();
     fs::write(
-        dir.path().join("repolayer.yml"),
-        "repos:\n  - path: ./\n",
+        dir.path().join("src/utils.ts"),
+        "export function helper() {}\n",
     )
     .unwrap();
-    fs::create_dir_all(dir.path().join("src")).unwrap();
-    fs::write(dir.path().join("src/utils.ts"), "export function helper() {}\n").unwrap();
     fs::write(
         dir.path().join("src/main.ts"),
         "import { helper } from './utils';\nhelper();\n",
@@ -25,8 +28,7 @@ fn reverse_deps_runs_on_simple_workspace() {
 
     // Ask who imports utils.ts — should succeed regardless of whether it
     // finds callers (src/main.ts should be detected).
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(dir.path())
         .arg("reverse-deps")
         .arg("src/utils.ts")
@@ -37,11 +39,7 @@ fn reverse_deps_runs_on_simple_workspace() {
 #[test]
 fn reverse_deps_json_flag_produces_valid_json() {
     let dir = tempdir().unwrap();
-    fs::write(
-        dir.path().join("repolayer.yml"),
-        "repos:\n  - path: ./\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("repolayer.yml"), "repos:\n  - path: ./\n").unwrap();
     fs::create_dir_all(dir.path().join("src")).unwrap();
     fs::write(dir.path().join("src/lib.ts"), "export const LIB = true;\n").unwrap();
     fs::write(
@@ -55,8 +53,7 @@ fn reverse_deps_json_flag_produces_valid_json() {
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .current_dir(dir.path())
         .arg("reverse-deps")
         .arg("src/lib.ts")
@@ -64,10 +61,13 @@ fn reverse_deps_json_flag_produces_valid_json() {
         .output()
         .unwrap();
 
-    assert!(output.status.success(), "stderr: {}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let v: serde_json::Value = serde_json::from_str(&stdout)
-        .expect("stdout should be valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be valid JSON");
     assert_eq!(v["schema_version"], "ast-outline.reverse-deps.v1");
     assert!(v["callers"].is_array());
     assert!(v["target"].is_string());

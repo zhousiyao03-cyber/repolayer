@@ -1,6 +1,9 @@
-use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 #[test]
 fn cross_repo_import_creates_edge() {
@@ -18,8 +21,7 @@ repos:
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -78,8 +80,7 @@ repos:
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
@@ -138,8 +139,7 @@ repos:
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()

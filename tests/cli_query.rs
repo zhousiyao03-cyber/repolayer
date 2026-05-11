@@ -1,7 +1,10 @@
-use assert_cmd::Command;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 #[test]
 fn query_finds_symbols_by_substring() {
@@ -16,15 +19,13 @@ fn query_finds_symbols_by_substring() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
         .success();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .args(["query", "login"])
         .assert()
@@ -45,15 +46,13 @@ fn query_returns_no_matches_message_when_empty() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
         .success();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .args(["query", "nonexistent_xyzabc"])
         .assert()
@@ -80,15 +79,13 @@ fn query_treats_underscore_as_literal_not_wildcard() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
         .success();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .current_dir(workspace.path())
         .args(["query", "get_user"])
         .output()
@@ -122,15 +119,13 @@ fn query_includes_idl_method_and_service_nodes() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
         .success();
 
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .current_dir(workspace.path())
         .args(["query", "GetBenefit", "--json"])
         .output()
@@ -177,16 +172,14 @@ fn query_repo_filter_restricts_to_named_repo() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
         .success();
 
     // Without filter: should hit both repos.
-    let no_filter = Command::cargo_bin("repolayer")
-        .unwrap()
+    let no_filter = repolayer_cmd()
         .current_dir(workspace.path())
         .args(["query", "shared_symbol", "--json"])
         .output()
@@ -201,8 +194,7 @@ fn query_repo_filter_restricts_to_named_repo() {
     assert!(nf_repos.contains("alpha") && nf_repos.contains("beta"));
 
     // With --repo alpha: only alpha.
-    let filtered = Command::cargo_bin("repolayer")
-        .unwrap()
+    let filtered = repolayer_cmd()
         .current_dir(workspace.path())
         .args(["query", "shared_symbol", "--repo", "alpha", "--json"])
         .output()
@@ -222,19 +214,20 @@ fn query_unknown_repo_errors_with_suggestion() {
     fs::write(repo.join("src/a.ts"), "export function fn() {}\n").unwrap();
     fs::write(
         workspace.path().join("repolayer.yml"),
-        format!("repos:\n  - {{ name: known_name, path: {} }}\n", repo.display()),
+        format!(
+            "repos:\n  - {{ name: known_name, path: {} }}\n",
+            repo.display()
+        ),
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(workspace.path())
         .arg("build")
         .assert()
         .success();
 
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .current_dir(workspace.path())
         .args(["query", "fn", "--repo", "knwon_name"]) // typo
         .output()

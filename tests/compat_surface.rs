@@ -1,6 +1,9 @@
-use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 // ---------------------------------------------------------------------------
 // CLI tests
@@ -25,8 +28,7 @@ edition = "2021"
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("surface")
         .arg(dir.path())
         .output()
@@ -59,14 +61,9 @@ edition = "2021"
     )
     .unwrap();
     fs::create_dir_all(dir.path().join("src")).unwrap();
-    fs::write(
-        dir.path().join("src/lib.rs"),
-        "pub fn hello() {}\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("src/lib.rs"), "pub fn hello() {}\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("surface")
         .arg("--json")
         .arg(dir.path())
@@ -105,8 +102,7 @@ fn surface_python_package() {
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("surface")
         .arg(dir.path())
         .output()
@@ -139,8 +135,7 @@ fn surface_typescript_package() {
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("surface")
         .arg(dir.path())
         .output()
@@ -167,8 +162,7 @@ fn surface_no_manifest_falls_back_gracefully() {
 
     // surface may exit non-zero when there's no recognizable package.
     // We just check it doesn't panic (no signal / crash).
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("surface")
         .arg(dir.path())
         .output()

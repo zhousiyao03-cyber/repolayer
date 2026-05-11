@@ -1,7 +1,10 @@
-use assert_cmd::Command;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 // ---------------------------------------------------------------------------
 // CLI tests
@@ -13,8 +16,7 @@ fn show_command_extracts_function_body() {
     let f = dir.path().join("foo.rs");
     fs::write(&f, "pub fn add(a: i32, b: i32) -> i32 {\n    a + b\n}\n").unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .arg("show")
         .arg(&f)
         .arg("add")
@@ -29,8 +31,7 @@ fn show_with_json_emits_schema() {
     let f = dir.path().join("foo.rs");
     fs::write(&f, "pub fn add() {}\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("show")
         .arg("--json")
         .arg(&f)
@@ -52,14 +53,9 @@ fn show_with_json_emits_schema() {
 fn show_json_output_is_valid_json() {
     let dir = tempdir().unwrap();
     let f = dir.path().join("math.rs");
-    fs::write(
-        &f,
-        "pub fn multiply(x: i32, y: i32) -> i32 { x * y }\n",
-    )
-    .unwrap();
+    fs::write(&f, "pub fn multiply(x: i32, y: i32) -> i32 { x * y }\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("show")
         .arg("--json")
         .arg(&f)
@@ -85,8 +81,7 @@ fn show_unknown_symbol_reports_not_found() {
     let f = dir.path().join("foo.rs");
     fs::write(&f, "pub fn add() {}\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("show")
         .arg(&f)
         .arg("nonexistent_function")
@@ -116,8 +111,7 @@ fn show_multiple_symbols_returns_all() {
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("show")
         .arg(&f)
         .arg("add")
@@ -137,8 +131,7 @@ fn show_unknown_extension_errors() {
     let f = dir.path().join("data.xyz");
     fs::write(&f, "some content\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("show")
         .arg(&f)
         .arg("anything")
@@ -162,8 +155,7 @@ fn show_suffix_matching_works() {
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .arg("show")
         .arg(&f)
         .arg("greet")

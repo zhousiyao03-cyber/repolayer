@@ -1,7 +1,10 @@
-use assert_cmd::Command;
 use predicates::str::contains;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 // ---------------------------------------------------------------------------
 // CLI tests
@@ -13,8 +16,7 @@ fn digest_command_emits_compact_summary() {
     let f = dir.path().join("foo.rs");
     fs::write(&f, "pub fn add() {} pub fn sub() {}\n").unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .arg("digest")
         .arg(&f)
         .assert()
@@ -28,12 +30,7 @@ fn digest_command_shows_function_signatures() {
     let f = dir.path().join("math.rs");
     fs::write(&f, "pub fn multiply(x: i32, y: i32) -> i32 { x * y }\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
-        .arg("digest")
-        .arg(&f)
-        .output()
-        .unwrap();
+    let output = repolayer_cmd().arg("digest").arg(&f).output().unwrap();
 
     assert!(output.status.success(), "digest command should succeed");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -51,8 +48,7 @@ fn digest_json_flag_emits_valid_json() {
     let f = dir.path().join("foo.rs");
     fs::write(&f, "pub fn add() -> i32 { 0 }\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("digest")
         .arg("--json")
         .arg(&f)
@@ -87,8 +83,7 @@ fn digest_directory_walks_all_supported_files() {
     fs::write(subdir.join("a.rs"), "pub fn a() {}\n").unwrap();
     fs::write(subdir.join("b.rs"), "pub fn b() {}\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("digest")
         .arg(dir.path())
         .output()
@@ -107,8 +102,7 @@ fn digest_unknown_extension_warns_but_succeeds() {
     let f = dir.path().join("data.xyz");
     fs::write(&f, "some unknown content\n").unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .arg("digest")
         .arg(&f)
         .assert()
@@ -126,12 +120,7 @@ fn digest_typescript_file_includes_function() {
     )
     .unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
-        .arg("digest")
-        .arg(&f)
-        .output()
-        .unwrap();
+    let output = repolayer_cmd().arg("digest").arg(&f).output().unwrap();
 
     assert!(output.status.success());
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -148,8 +137,7 @@ fn digest_json_output_contains_files_array() {
     let f = dir.path().join("bar.rs");
     fs::write(&f, "pub struct Foo { x: i32 }\n").unwrap();
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .arg("digest")
         .arg("--json")
         .arg(&f)

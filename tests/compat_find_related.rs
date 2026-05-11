@@ -1,6 +1,9 @@
-use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 /// Helper: set up a minimal workspace, run `build`, return the tempdir.
 fn make_workspace_with_build() -> tempfile::TempDir {
@@ -16,19 +19,14 @@ fn make_workspace_with_build() -> tempfile::TempDir {
         "export function createSession(userId: string): string { return `sess_${userId}`; }\n",
     )
     .unwrap();
-    fs::write(
-        dir.path().join("repolayer.yml"),
-        "repos:\n  - path: ./\n",
-    )
-    .unwrap();
+    fs::write(dir.path().join("repolayer.yml"), "repos:\n  - path: ./\n").unwrap();
     fs::write(
         dir.path().join("package.json"),
         r#"{"name":"find-related-test","version":"0.1.0"}"#,
     )
     .unwrap();
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(dir.path())
         .arg("build")
         .assert()
@@ -40,8 +38,7 @@ fn make_workspace_with_build() -> tempfile::TempDir {
 #[test]
 fn find_related_no_index_exits_nonzero() {
     let dir = tempdir().unwrap();
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(dir.path())
         .arg("find-related")
         .arg("src/auth.ts:1")
@@ -53,8 +50,7 @@ fn find_related_no_index_exits_nonzero() {
 fn find_related_bad_spec_exits_nonzero() {
     let dir = make_workspace_with_build();
     // Non-existent file + line → no chunk found → error.
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(dir.path())
         .arg("find-related")
         .arg("nonexistent_file.ts:99")
@@ -67,8 +63,7 @@ fn find_related_json_produces_valid_json() {
     let dir = make_workspace_with_build();
     let auth_path = dir.path().join("src/auth.ts");
 
-    let output = Command::cargo_bin("repolayer")
-        .unwrap()
+    let output = repolayer_cmd()
         .current_dir(dir.path())
         .arg("find-related")
         .arg(format!("{}:1", auth_path.display()))
@@ -83,8 +78,7 @@ fn find_related_json_produces_valid_json() {
     );
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let v: serde_json::Value =
-        serde_json::from_str(&stdout).expect("stdout should be valid JSON");
+    let v: serde_json::Value = serde_json::from_str(&stdout).expect("stdout should be valid JSON");
     assert_eq!(v["schema_version"], "ast-outline.find_related.v1");
     assert!(v["source"].is_string());
     assert!(v["hits"].is_array());
@@ -105,8 +99,7 @@ fn find_related_runs_after_build() {
     let dir = make_workspace_with_build();
     let auth_path = dir.path().join("src/auth.ts");
 
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .current_dir(dir.path())
         .arg("find-related")
         .arg(format!("{}:1", auth_path.display()))

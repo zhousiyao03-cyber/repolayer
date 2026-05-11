@@ -1,6 +1,9 @@
-use assert_cmd::Command;
 use std::fs;
 use tempfile::tempdir;
+
+#[path = "common/mod.rs"]
+mod common;
+use common::repolayer_cmd;
 
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     fs::create_dir_all(dst)?;
@@ -30,8 +33,7 @@ repos:
 "#,
     )
     .unwrap();
-    Command::cargo_bin("repolayer")
-        .unwrap()
+    repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(workspace.path())
         .arg("build")
@@ -43,8 +45,7 @@ repos:
 #[test]
 fn find_idl_impl_returns_implements_and_invokes() {
     let ws = build_idl_workspace();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["find-idl-impl", "GetBenefit", "--json"])
@@ -105,8 +106,7 @@ fn find_idl_impl_returns_implements_and_invokes() {
 #[test]
 fn find_idl_impl_human_output_includes_confidence_guide() {
     let ws = build_idl_workspace();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["find-idl-impl", "GetBenefit"])
@@ -122,8 +122,7 @@ fn find_idl_impl_human_output_includes_confidence_guide() {
 #[test]
 fn find_idl_impl_unknown_method_emits_fallback() {
     let ws = build_idl_workspace();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["find-idl-impl", "NoSuchRpc"])
@@ -138,8 +137,7 @@ fn find_idl_impl_unknown_method_emits_fallback() {
 #[test]
 fn find_idl_impl_no_implements_flag_skips_server_side() {
     let ws = build_idl_workspace();
-    let out = Command::cargo_bin("repolayer")
-        .unwrap()
+    let out = repolayer_cmd()
         .env_remove("REPOLAYER_INDEX")
         .current_dir(ws.path())
         .args(["find-idl-impl", "GetBenefit", "--no-implements", "--json"])

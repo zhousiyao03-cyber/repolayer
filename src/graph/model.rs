@@ -6,9 +6,9 @@ use sha2::{Digest, Sha256};
 pub enum NodeKind {
     Repo,
     Module,
-    Type,        // class/struct/interface/trait/enum/record
-    Method,      // method/ctor/dtor/operator inside a Type
-    Function,    // top-level function
+    Type,     // class/struct/interface/trait/enum/record
+    Method,   // method/ctor/dtor/operator inside a Type
+    Function, // top-level function
     IdlService,
     IdlMethod,
 }

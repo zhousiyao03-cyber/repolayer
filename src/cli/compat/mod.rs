@@ -19,8 +19,6 @@ use std::path::Path;
 ///
 /// The simpler "always build" path is used for Plan C; cache lookup via
 /// `.repolayer/deps.db` can be added in a later iteration.
-pub(crate) fn load_or_build_dep_graph(
-    workspace_root: &Path,
-) -> Result<crate::deps::DepGraph> {
+pub(crate) fn load_or_build_dep_graph(workspace_root: &Path) -> Result<crate::deps::DepGraph> {
     crate::deps::build_for_repo(workspace_root).map_err(Into::into)
 }

@@ -186,8 +186,14 @@ mod tests {
             toks,
             vec![
                 "def",
-                "getuserbyid", "get", "user", "by", "id",
-                "user_id", "user", "id"
+                "getuserbyid",
+                "get",
+                "user",
+                "by",
+                "id",
+                "user_id",
+                "user",
+                "id"
             ]
         );
     }

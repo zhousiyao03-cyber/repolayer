@@ -198,7 +198,10 @@ mod tests {
             vec![s("foo"), s("foo"), s("foo"), s("bar")],
         ]);
         let scores = idx.get_scores(&[s("foo")], None);
-        assert!(scores[1] > scores[0], "more 'foo' occurrences should score higher");
+        assert!(
+            scores[1] > scores[0],
+            "more 'foo' occurrences should score higher"
+        );
     }
 
     #[test]
@@ -206,8 +209,8 @@ mod tests {
         // BM25 length normalization: between two docs each containing one "foo",
         // the shorter doc should rank higher.
         let idx = Bm25Index::build(vec![
-            vec![s("foo")],                                     // dl=1
-            vec![s("foo"), s("a"), s("b"), s("c"), s("d")],     // dl=5
+            vec![s("foo")],                                 // dl=1
+            vec![s("foo"), s("a"), s("b"), s("c"), s("d")], // dl=5
         ]);
         let scores = idx.get_scores(&[s("foo")], None);
         assert!(scores[0] > scores[1], "shorter doc must score higher");

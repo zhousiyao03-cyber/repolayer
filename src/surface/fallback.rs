@@ -70,8 +70,10 @@ fn _walk(
         });
     }
 
-    let next_prefix = if matches!(decl.kind, Namespace | Class | Struct | Interface | Record | Enum)
-    {
+    let next_prefix = if matches!(
+        decl.kind,
+        Namespace | Class | Struct | Interface | Record | Enum
+    ) {
         qname
     } else {
         prefix.to_string()

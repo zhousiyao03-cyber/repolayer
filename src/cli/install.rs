@@ -49,12 +49,16 @@ fn install_skill(dest: &Path) -> Result<()> {
                 .unwrap_or(0),
         ));
         std::fs::rename(&legacy, &backup).ok();
-        println!("archived legacy {} → {}", legacy.display(), backup.display());
+        println!(
+            "archived legacy {} → {}",
+            legacy.display(),
+            backup.display()
+        );
     }
 
     if dest.exists() {
-        let existing = std::fs::read_to_string(dest)
-            .map_err(|e| anyhow!("read {}: {}", dest.display(), e))?;
+        let existing =
+            std::fs::read_to_string(dest).map_err(|e| anyhow!("read {}: {}", dest.display(), e))?;
         if existing == SKILL_MD {
             println!("skill already up to date at {}", dest.display());
             return Ok(());
@@ -66,8 +70,7 @@ fn install_skill(dest: &Path) -> Result<()> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0),
         ));
-        std::fs::copy(dest, &backup)
-            .map_err(|e| anyhow!("backup {}: {}", dest.display(), e))?;
+        std::fs::copy(dest, &backup).map_err(|e| anyhow!("backup {}: {}", dest.display(), e))?;
         println!("backed up existing skill to {}", backup.display());
     }
 

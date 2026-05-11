@@ -67,7 +67,11 @@ pub fn render_tree(entries: &[SurfaceEntry]) -> String {
         for it in items {
             let leaf = _leaf(&it.qualified_path);
             let kind = it.kind.to_string();
-            let glob = if it.via_glob { " [via *]".cyan().to_string() } else { String::new() };
+            let glob = if it.via_glob {
+                " [via *]".cyan().to_string()
+            } else {
+                String::new()
+            };
             out.push_str(&format!(
                 "  ├─ {} {}  {}{}\n",
                 kind.dimmed(),

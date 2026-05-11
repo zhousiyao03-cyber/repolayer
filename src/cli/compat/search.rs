@@ -46,13 +46,8 @@ pub async fn run(
     // isn't there, we silently degrade to BM25-only.
     let qv = crate::search::embed::try_encode_query(&query);
 
-    let (hits, lane) = store.search_hybrid_filtered(
-        &query,
-        k,
-        qv.as_deref(),
-        None,
-        validated_repo.as_deref(),
-    )?;
+    let (hits, lane) =
+        store.search_hybrid_filtered(&query, k, qv.as_deref(), None, validated_repo.as_deref())?;
 
     if json {
         let entries: Vec<serde_json::Value> = hits

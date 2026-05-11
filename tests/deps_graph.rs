@@ -15,7 +15,10 @@ fn dep_graph_forward_and_reverse() {
         }],
     );
     // verify forward retrieval
-    assert_eq!(g.forward.get(&PathBuf::from("/root/a.rs")).unwrap().len(), 1);
+    assert_eq!(
+        g.forward.get(&PathBuf::from("/root/a.rs")).unwrap().len(),
+        1
+    );
 
     // verify reverse adjacency
     let rev = g.reverse_adjacency();

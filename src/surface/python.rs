@@ -63,10 +63,7 @@ impl Walker {
         let src = std::str::from_utf8(&parse.source).unwrap_or("").to_string();
         let imports = imports::extract_python_imports(&src);
 
-        let pkg_dir = init_file
-            .parent()
-            .unwrap_or(Path::new("."))
-            .to_path_buf();
+        let pkg_dir = init_file.parent().unwrap_or(Path::new(".")).to_path_buf();
 
         // Determine the public set.
         let public: PublicSet = match &imports.dunder_all {
@@ -123,7 +120,12 @@ impl Walker {
                     sub_walker.walk_package(&sub_init, &sub_segments, depth + 1);
                     // Re-publish into our segments with a glob hop.
                     for e in sub_walker.entries {
-                        let last = e.qualified_path.rsplit('.').next().unwrap_or("").to_string();
+                        let last = e
+                            .qualified_path
+                            .rsplit('.')
+                            .next()
+                            .unwrap_or("")
+                            .to_string();
                         let mut chain = e.re_export_chain.clone();
                         chain.insert(0, hop.clone());
                         self._publish_external(segments, &last, &e, chain);
@@ -182,8 +184,8 @@ impl Walker {
             };
             // If the import statement was `from . import submod`, we don't
             // search by name — the imported name IS a sub-module reference.
-            let want_module_itself =
-                fi.module.is_empty() && cand.file_name().and_then(|s| s.to_str()) == Some("__init__.py");
+            let want_module_itself = fi.module.is_empty()
+                && cand.file_name().and_then(|s| s.to_str()) == Some("__init__.py");
             if want_module_itself {
                 // Re-export every public symbol from that module.
                 let src = std::str::from_utf8(&parse.source).unwrap_or("").to_string();
@@ -219,7 +221,10 @@ impl Walker {
                     continue;
                 }
                 for sub_name in &sub_fi.names {
-                    let local = sub_name.alias.clone().unwrap_or_else(|| sub_name.name.clone());
+                    let local = sub_name
+                        .alias
+                        .clone()
+                        .unwrap_or_else(|| sub_name.name.clone());
                     if local != source_name {
                         continue;
                     }
@@ -329,4 +334,3 @@ fn _ascend(start: &Path, levels: usize) -> Option<PathBuf> {
     }
     Some(cur)
 }
-

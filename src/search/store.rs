@@ -117,9 +117,11 @@ impl SearchStore {
 
         for chunk in chunks {
             // Derive a stable hash from file path + start_line + end_line.
-            let hash_bytes: Vec<u8> =
-                format!("{}-{}-{}", chunk.file_path, chunk.start_line, chunk.end_line)
-                    .into_bytes();
+            let hash_bytes: Vec<u8> = format!(
+                "{}-{}-{}",
+                chunk.file_path, chunk.start_line, chunk.end_line
+            )
+            .into_bytes();
             self.conn.execute(
                 "INSERT INTO chunks(repo, path, start_line, end_line, content, chunk_hash)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -162,11 +164,7 @@ impl SearchStore {
     /// callers convert to a similarity if they need one.
     pub fn knn_search(&self, query: &[f32], k: usize) -> Result<Vec<(i64, f32)>> {
         if query.len() != DIM {
-            anyhow::bail!(
-                "knn_search: expected {} dims, got {}",
-                DIM,
-                query.len()
-            );
+            anyhow::bail!("knn_search: expected {} dims, got {}", DIM, query.len());
         }
         let bytes = vector_to_le_bytes(query);
         let mut stmt = self.conn.prepare(
@@ -256,10 +254,7 @@ impl SearchStore {
     }
 
     /// Same as [`list_all_chunks`] but optionally restricted to a single repo.
-    pub fn list_chunks_filtered(
-        &self,
-        repo_filter: Option<&str>,
-    ) -> Result<Vec<ChunkRowWithRepo>> {
+    pub fn list_chunks_filtered(&self, repo_filter: Option<&str>) -> Result<Vec<ChunkRowWithRepo>> {
         let map_row = |row: &rusqlite::Row<'_>| -> rusqlite::Result<ChunkRowWithRepo> {
             Ok((
                 row.get::<_, i64>(0)?,
@@ -322,9 +317,11 @@ impl SearchStore {
     pub fn insert_file_chunks(&self, repo: &str, chunks: &[Chunk]) -> Result<Vec<i64>> {
         let mut ids = Vec::with_capacity(chunks.len());
         for chunk in chunks {
-            let hash_bytes: Vec<u8> =
-                format!("{}-{}-{}", chunk.file_path, chunk.start_line, chunk.end_line)
-                    .into_bytes();
+            let hash_bytes: Vec<u8> = format!(
+                "{}-{}-{}",
+                chunk.file_path, chunk.start_line, chunk.end_line
+            )
+            .into_bytes();
             self.conn.execute(
                 "INSERT INTO chunks(repo, path, start_line, end_line, content, chunk_hash)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -413,8 +410,7 @@ impl SearchStore {
             .enumerate()
             .filter_map(|(i, &s)| if s > 0.0 { Some((i as u32, s)) } else { None })
             .collect();
-        bm25_ranked
-            .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        bm25_ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         bm25_ranked.truncate(k * 4);
 
         // Optional dense path. We feed vec0 distances back through RRF after

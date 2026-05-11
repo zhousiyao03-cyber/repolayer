@@ -166,12 +166,7 @@ fn service_filter_narrows_results() {
 fn sorted_by_confidence_descending() {
     let (_d, s) = setup_store();
 
-    let idl_method = Node::new(
-        NodeKind::IdlMethod,
-        "idl",
-        "svc.proto",
-        Some("Svc.Method"),
-    );
+    let idl_method = Node::new(NodeKind::IdlMethod, "idl", "svc.proto", Some("Svc.Method"));
     s.upsert_node(&idl_method).unwrap();
 
     // Three implementors with different confidences

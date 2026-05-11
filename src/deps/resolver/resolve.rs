@@ -52,21 +52,20 @@ pub fn resolve(spec: &str, ctx: &ResolveCtx<'_>, idx: &SuffixIndex) -> Option<Pa
     // Language-specific normalisation: `crate::x::y` → `x/y`,
     // `self::x` → relative-to-current-dir, `super::x` → ascend one.
     if ctx.lang == Lang::Rust {
-        let resolve_with_fallback =
-            |key: String| -> Option<PathBuf> {
-                if let Some(p) = pick_closest(idx.lookup(&key), ctx.from_file) {
+        let resolve_with_fallback = |key: String| -> Option<PathBuf> {
+            if let Some(p) = pick_closest(idx.lookup(&key), ctx.from_file) {
+                return Some(p);
+            }
+            let mut parts: Vec<&str> = key.split('/').collect();
+            while parts.len() > 1 {
+                parts.pop();
+                let trimmed = parts.join("/");
+                if let Some(p) = pick_closest(idx.lookup(&trimmed), ctx.from_file) {
                     return Some(p);
                 }
-                let mut parts: Vec<&str> = key.split('/').collect();
-                while parts.len() > 1 {
-                    parts.pop();
-                    let trimmed = parts.join("/");
-                    if let Some(p) = pick_closest(idx.lookup(&trimmed), ctx.from_file) {
-                        return Some(p);
-                    }
-                }
-                None
-            };
+            }
+            None
+        };
 
         if let Some(rest) = spec.strip_prefix("crate::") {
             return resolve_with_fallback(rest.replace("::", "/"));
@@ -95,19 +94,14 @@ pub fn resolve(spec: &str, ctx: &ResolveCtx<'_>, idx: &SuffixIndex) -> Option<Pa
     }
 
     // TS/JS relative: `./foo` / `../foo`.
-    if (matches!(
-        ctx.lang,
-        Lang::TypeScript | Lang::Tsx | Lang::JavaScript
-    )) && (spec.starts_with('.'))
+    if (matches!(ctx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript))
+        && (spec.starts_with('.'))
     {
         return resolve_relative_path(spec, ctx, idx);
     }
 
     // tsconfig path aliases.
-    if matches!(
-        ctx.lang,
-        Lang::TypeScript | Lang::Tsx | Lang::JavaScript
-    ) {
+    if matches!(ctx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
         for (prefix, replacement) in ctx.path_aliases {
             if let Some(rest) = spec.strip_prefix(prefix.as_str()) {
                 let combined = format!("{}{}", replacement, rest);
@@ -167,11 +161,7 @@ pub fn resolve(spec: &str, ctx: &ResolveCtx<'_>, idx: &SuffixIndex) -> Option<Pa
 }
 
 /// Walk a relative `./x/y` style path against `from_file`'s directory.
-fn resolve_relative_path(
-    spec: &str,
-    ctx: &ResolveCtx<'_>,
-    idx: &SuffixIndex,
-) -> Option<PathBuf> {
+fn resolve_relative_path(spec: &str, ctx: &ResolveCtx<'_>, idx: &SuffixIndex) -> Option<PathBuf> {
     let parent = ctx.from_file.parent()?;
     let mut cur = parent.to_path_buf();
     let mut remaining = spec;
@@ -188,10 +178,7 @@ fn resolve_relative_path(
         return Some(target);
     }
     // Try common extensions for TS/JS.
-    if matches!(
-        ctx.lang,
-        Lang::TypeScript | Lang::Tsx | Lang::JavaScript
-    ) {
+    if matches!(ctx.lang, Lang::TypeScript | Lang::Tsx | Lang::JavaScript) {
         let ext_order: &[&str] = &[
             ".ts", ".tsx", ".mts", ".cts", ".d.ts", ".js", ".jsx", ".mjs", ".cjs", ".json",
         ];

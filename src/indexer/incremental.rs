@@ -88,11 +88,7 @@ pub fn update(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Resu
                         &r.edges,
                         &r.external,
                     ) {
-                        warn!(
-                            "deps upsert_file_edges {} failed: {}",
-                            r.file.display(),
-                            e
-                        );
+                        warn!("deps upsert_file_edges {} failed: {}", r.file.display(), e);
                     }
                 }
                 // Files that were deleted from disk (or whose language is now
@@ -160,10 +156,7 @@ struct RepoChanges {
 /// Encode a set of chunk ids and write the resulting vectors to `chunk_vec`.
 /// Returns `Ok(())` and skips silently if the embedding model isn't already
 /// cached on disk — `update` should never block on a 64 MB download.
-fn embed_chunks_if_cached(
-    store: &crate::search::store::SearchStore,
-    ids: &[i64],
-) -> Result<()> {
+fn embed_chunks_if_cached(store: &crate::search::store::SearchStore, ids: &[i64]) -> Result<()> {
     use crate::search::download::{ensure_model, ModelInfo};
     use crate::search::embed::Embedder;
 
@@ -187,10 +180,8 @@ fn embed_chunks_if_cached(
     }
 
     let info = ModelInfo::potion_code_16m();
-    let dir = ensure_model(&info)
-        .map_err(|e| anyhow::anyhow!("ensure_model failed: {}", e))?;
-    let embedder = Embedder::open(&dir)
-        .map_err(|e| anyhow::anyhow!("loading embedder: {}", e))?;
+    let dir = ensure_model(&info).map_err(|e| anyhow::anyhow!("ensure_model failed: {}", e))?;
+    let embedder = Embedder::open(&dir).map_err(|e| anyhow::anyhow!("loading embedder: {}", e))?;
 
     // Pull (id, content) for the ids we just inserted.
     let placeholders: String = ids
@@ -199,9 +190,7 @@ fn embed_chunks_if_cached(
         .map(|(i, _)| format!("?{}", i + 1))
         .collect::<Vec<_>>()
         .join(",");
-    let sql = format!(
-        "SELECT id, content FROM chunks WHERE id IN ({placeholders})"
-    );
+    let sql = format!("SELECT id, content FROM chunks WHERE id IN ({placeholders})");
     let conn = store.conn();
     let mut stmt = conn.prepare(&sql)?;
     let params_dyn: Vec<&dyn rusqlite::ToSql> =

@@ -75,7 +75,11 @@ fn delete_file_removes_only_target() {
 fn chunk_fields_preserved() {
     let dir = tempdir().unwrap();
     let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
-    let chunks = vec![make_chunk("src/lib.rs", 42, "pub fn answer() -> u32 { 42 }")];
+    let chunks = vec![make_chunk(
+        "src/lib.rs",
+        42,
+        "pub fn answer() -> u32 { 42 }",
+    )];
     s.replace_repo_chunks("myrepo", &chunks).unwrap();
     let listed = s.list_chunks("myrepo").unwrap();
     assert_eq!(listed.len(), 1);
@@ -152,14 +156,21 @@ fn hybrid_bm25_only_finds_keyword_match() {
         "r",
         &[
             make_chunk("a.rs", 1, "fn authenticate(user: &str) -> bool { true }"),
-            make_chunk("b.rs", 1, "fn render_template(ctx: &Ctx) -> String { String::new() }"),
+            make_chunk(
+                "b.rs",
+                1,
+                "fn render_template(ctx: &Ctx) -> String { String::new() }",
+            ),
             make_chunk("c.rs", 1, "fn parse_yaml(input: &str) -> Value { todo!() }"),
         ],
     )
     .unwrap();
 
     let (hits, lane) = s.search_hybrid("authenticate", 5, None, None).unwrap();
-    assert!(!hits.is_empty(), "expected BM25-only path to return matches");
+    assert!(
+        !hits.is_empty(),
+        "expected BM25-only path to return matches"
+    );
     assert_eq!(hits[0].path, "a.rs", "best match should be a.rs");
     assert_eq!(lane, repolayer::search::store::SearchLane::Bm25Only);
 }
@@ -172,7 +183,11 @@ fn hybrid_substring_fallback_when_no_signal() {
     let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
     s.replace_repo_chunks(
         "r",
-        &[make_chunk("a.rs", 1, "Bizarre needle inside markup_block_42")],
+        &[make_chunk(
+            "a.rs",
+            1,
+            "Bizarre needle inside markup_block_42",
+        )],
     )
     .unwrap();
 
@@ -206,7 +221,13 @@ fn hybrid_with_query_embedding_uses_dense_signal() {
     let qv = unit_vec(0);
     let (hits, lane) = s.search_hybrid("delta", 5, Some(&qv), Some(0.5)).unwrap();
     let ids: Vec<i64> = hits.iter().map(|h| h.id).collect();
-    assert!(ids.contains(&1), "expected dense-favoured chunk 1 in {ids:?}");
-    assert!(ids.contains(&2), "expected BM25-favoured chunk 2 in {ids:?}");
+    assert!(
+        ids.contains(&1),
+        "expected dense-favoured chunk 1 in {ids:?}"
+    );
+    assert!(
+        ids.contains(&2),
+        "expected BM25-favoured chunk 2 in {ids:?}"
+    );
     assert_eq!(lane, repolayer::search::store::SearchLane::Fusion);
 }

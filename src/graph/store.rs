@@ -216,9 +216,9 @@ impl Store {
     }
 
     pub fn get_edges_from(&self, from_id: &str) -> Result<Vec<Edge>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT from_id, to_id, kind, confidence FROM edges WHERE from_id = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT from_id, to_id, kind, confidence FROM edges WHERE from_id = ?1")?;
         let rows = stmt.query_map(rusqlite::params![from_id], |row| {
             let kind_str: String = row.get(2)?;
             let kind = edge_kind_from_db(&kind_str)?;
@@ -235,9 +235,9 @@ impl Store {
 
     pub fn outgoing_edges(&self, from: &str, kind: EdgeKind) -> Result<Vec<Edge>> {
         let kind_str = kind_to_db(kind)?;
-        let mut stmt = self
-            .conn
-            .prepare("SELECT from_id, to_id, kind, confidence FROM edges WHERE from_id = ?1 AND kind = ?2")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT from_id, to_id, kind, confidence FROM edges WHERE from_id = ?1 AND kind = ?2",
+        )?;
         let edges = stmt
             .query_map(params![from, kind_str], |row| {
                 Ok(Edge {
@@ -253,9 +253,9 @@ impl Store {
 
     pub fn incoming_edges(&self, to: &str, kind: EdgeKind) -> Result<Vec<Edge>> {
         let kind_str = kind_to_db(kind)?;
-        let mut stmt = self
-            .conn
-            .prepare("SELECT from_id, to_id, kind, confidence FROM edges WHERE to_id = ?1 AND kind = ?2")?;
+        let mut stmt = self.conn.prepare(
+            "SELECT from_id, to_id, kind, confidence FROM edges WHERE to_id = ?1 AND kind = ?2",
+        )?;
         let edges = stmt
             .query_map(params![to, kind_str], |row| {
                 Ok(Edge {
@@ -296,11 +296,7 @@ impl Store {
 
     /// Find IdlMethod nodes whose symbol contains `name`.
     /// If `service` is given, further restrict to symbols that start with `service`.
-    pub fn find_idl_methods_by_name(
-        &self,
-        name: &str,
-        service: Option<&str>,
-    ) -> Result<Vec<Node>> {
+    pub fn find_idl_methods_by_name(&self, name: &str, service: Option<&str>) -> Result<Vec<Node>> {
         let escaped = name
             .replace('\\', "\\\\")
             .replace('%', "\\%")
@@ -393,8 +389,7 @@ impl Store {
                      LIMIT ?3"
                 );
                 let mut stmt = self.conn.prepare(&sql)?;
-                let mapped =
-                    stmt.query_map(params![repo, pattern, limit as i64], row_to_node)?;
+                let mapped = stmt.query_map(params![repo, pattern, limit as i64], row_to_node)?;
                 mapped.collect::<Result<Vec<_>, _>>()?
             }
         };

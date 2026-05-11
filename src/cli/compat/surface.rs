@@ -20,8 +20,8 @@ pub async fn run(path: PathBuf, json: bool) -> Result<()> {
         SurfaceOptions::default()
     };
 
-    let entries = crate::surface::resolve_surface(&path, &opts)
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+    let entries =
+        crate::surface::resolve_surface(&path, &opts).map_err(|e| anyhow::anyhow!("{}", e))?;
 
     let text = render::render(&entries, opts.output, opts.include_chain);
     print!("{}", text);

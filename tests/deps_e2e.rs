@@ -19,9 +19,11 @@ fn builds_dep_graph_on_simple_typescript_workspace() {
     let bar = d.path().join("src/bar.ts");
     let edges = g.forward.get(&bar).expect("bar has edges");
     assert!(
-        edges
-            .iter()
-            .any(|e| e.target.file_name().map(|f| f.to_string_lossy().contains("foo")).unwrap_or(false)),
+        edges.iter().any(|e| e
+            .target
+            .file_name()
+            .map(|f| f.to_string_lossy().contains("foo"))
+            .unwrap_or(false)),
         "expected edge to foo.ts, got: {:?}",
         edges.iter().map(|e| e.target.clone()).collect::<Vec<_>>()
     );

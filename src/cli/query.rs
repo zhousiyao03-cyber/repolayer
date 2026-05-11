@@ -24,11 +24,7 @@ pub async fn run(text: String, repo: Option<String>, json: bool) -> Result<()> {
         }
     };
 
-    let results = store.search_symbols_substring_filtered(
-        &text,
-        validated_repo.as_deref(),
-        20,
-    )?;
+    let results = store.search_symbols_substring_filtered(&text, validated_repo.as_deref(), 20)?;
 
     if json {
         let entries: Vec<serde_json::Value> = results

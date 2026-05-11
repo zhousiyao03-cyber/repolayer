@@ -351,12 +351,8 @@ impl Index {
 
         // Semantic top-N.
         let q_embed = self.embedder.encode_one(query);
-        let semantic_scored = cosine_topk(
-            &q_embed,
-            &self.embeddings,
-            mask.as_deref(),
-            candidate_count,
-        );
+        let semantic_scored =
+            cosine_topk(&q_embed, &self.embeddings, mask.as_deref(), candidate_count);
 
         // BM25 top-N.
         let query_tokens = tokenize(query);
@@ -378,7 +374,12 @@ impl Index {
         let scored = apply_query_boost(scored, query, &self.chunks);
 
         // Final top-k with path penalties + saturation decay.
-        let ranked = rerank_topk(&scored, &self.chunks, opts.top_k, /* penalise_paths */ true);
+        let ranked = rerank_topk(
+            &scored,
+            &self.chunks,
+            opts.top_k,
+            /* penalise_paths */ true,
+        );
         ranked
             .into_iter()
             .map(|(id, score)| SearchHit {
@@ -408,13 +409,10 @@ impl Index {
     /// Filters to chunks of the same language and excludes the source itself.
     /// When a fresh dep-graph cache exists, also applies a multiplicative
     /// boost to chunks in the importer/importee neighbourhood.
-    pub fn find_related(
-        &self,
-        file_path: &str,
-        line: u32,
-        top_k: usize,
-    ) -> Option<Vec<SearchHit>> {
-        self.find_related_opts(file_path, line, top_k, /* dep_boost */ true, /* dep_depth */ 2)
+    pub fn find_related(&self, file_path: &str, line: u32, top_k: usize) -> Option<Vec<SearchHit>> {
+        self.find_related_opts(
+            file_path, line, top_k, /* dep_boost */ true, /* dep_depth */ 2,
+        )
     }
 
     pub fn find_related_opts(
@@ -444,7 +442,8 @@ impl Index {
             if let Some(graph) = self.dep_graph_cached() {
                 let abs_source = self.paths.root.join(&source.file_path);
                 let abs_source = abs_source.canonicalize().unwrap_or(abs_source);
-                let depths = crate::deps::traverse::neighbourhood_depths(&graph, &abs_source, dep_depth);
+                let depths =
+                    crate::deps::traverse::neighbourhood_depths(&graph, &abs_source, dep_depth);
                 if !depths.is_empty() {
                     for (id, score) in scored.iter_mut() {
                         let chunk = &self.chunks[*id as usize];
@@ -459,7 +458,8 @@ impl Index {
                             };
                         }
                     }
-                    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+                    scored
+                        .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
                     scored.truncate(top_k);
                 }
             }
@@ -544,10 +544,7 @@ fn resolve_chunk(chunks: &[Chunk], file_path: &str, line: u32) -> Option<u32> {
 /// Append file path components to chunk content to boost path-based queries.
 fn enrich_for_bm25(chunk: &Chunk) -> String {
     let path = Path::new(&chunk.file_path);
-    let stem = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("");
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let dir_parts: Vec<&str> = path
         .parent()
         .map(|p| {
@@ -633,8 +630,8 @@ fn acquire_lock(paths: &IndexPaths) -> io::Result<fs::File> {
 }
 
 fn write_meta(path: &Path, meta: &Meta) -> io::Result<()> {
-    let json = serde_json::to_vec_pretty(meta)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let json =
+        serde_json::to_vec_pretty(meta).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     write_atomic(path, &json)
 }
 
@@ -836,7 +833,10 @@ mod tests {
         let meta = Meta {
             schema: SCHEMA.to_string(),
             ast_outline_version: env!("CARGO_PKG_VERSION").to_string(),
-            model: ModelMeta { id: "m".into(), dim: DIM as u32 },
+            model: ModelMeta {
+                id: "m".into(),
+                dim: DIM as u32,
+            },
             created_unix: 0,
             chunk_count: 1,
             embedding_dtype: "f32_le".to_string(),
@@ -903,7 +903,9 @@ mod tests {
             .expect("source chunk not found");
         assert!(!related.is_empty());
         // The source chunk itself must be excluded.
-        assert!(related.iter().all(|h| !h.chunk.file_path.contains("login.rs")));
+        assert!(related
+            .iter()
+            .all(|h| !h.chunk.file_path.contains("login.rs")));
 
         // Re-open from cache: should detect no changes and skip rebuild.
         let reopened = Index::open(dir.path()).expect("re-open failed");

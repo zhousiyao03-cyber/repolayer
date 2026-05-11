@@ -6,8 +6,8 @@
 //! the search index uses today).
 
 use crate::core::schema::JSON_SCHEMA_DEPS_INDEX;
-use crate::search::cache::{compute_delta, FileRecord, Delta};
 use crate::deps::graph::DepGraph;
+use crate::search::cache::{compute_delta, Delta, FileRecord};
 use bincode::serde::{decode_from_slice, encode_to_vec};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -75,8 +75,7 @@ pub fn save(root: &Path, graph: &DepGraph, files: &[FileRecord]) -> std::io::Res
         graph: graph.clone(),
         files: files.to_vec(),
     };
-    let bytes = encode_to_vec(&cf, bincode::config::standard())
-        .map_err(std::io::Error::other)?;
+    let bytes = encode_to_vec(&cf, bincode::config::standard()).map_err(std::io::Error::other)?;
 
     let final_path = cache_path(root);
     let tmp = final_path.with_extension("bin.tmp");

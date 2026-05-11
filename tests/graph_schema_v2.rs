@@ -46,11 +46,22 @@ fn idl_service_idl_method_kinds_persist() {
     let dir = tempdir().unwrap();
     let s = Store::open(&dir.path().join("index.db")).unwrap();
     let svc = Node::new(NodeKind::IdlService, "idl", "user.proto", Some("UserSvc"));
-    let m = Node::new(NodeKind::IdlMethod, "idl", "user.proto", Some("UserSvc.GetUser"));
+    let m = Node::new(
+        NodeKind::IdlMethod,
+        "idl",
+        "user.proto",
+        Some("UserSvc.GetUser"),
+    );
     s.upsert_node(&svc).unwrap();
     s.upsert_node(&m).unwrap();
-    assert!(matches!(s.get_node(&svc.id).unwrap().unwrap().kind, NodeKind::IdlService));
-    assert!(matches!(s.get_node(&m.id).unwrap().unwrap().kind, NodeKind::IdlMethod));
+    assert!(matches!(
+        s.get_node(&svc.id).unwrap().unwrap().kind,
+        NodeKind::IdlService
+    ));
+    assert!(matches!(
+        s.get_node(&m.id).unwrap().unwrap().kind,
+        NodeKind::IdlMethod
+    ));
 }
 
 #[test]
@@ -66,7 +77,8 @@ fn confidence_below_one_persists() {
         to: b.id.clone(),
         kind: EdgeKind::Invokes,
         confidence: 0.5,
-    }).unwrap();
+    })
+    .unwrap();
     let got = s.get_edges_from(&a.id).unwrap();
     assert!((got[0].confidence - 0.5).abs() < 0.001);
 }

@@ -227,8 +227,8 @@ mod tests {
         let path = touch(dir.path(), "f.rs", "fn x() {}");
         let record = FileRecord {
             path: "f.rs".to_string(),
-            mtime_ns: 0, // forces hash check
-            size: 999,   // mismatch on size too
+            mtime_ns: 0,      // forces hash check
+            size: 999,        // mismatch on size too
             content_hash: 42, // wrong hash
             chunk_start: 0,
             chunk_end: 1,

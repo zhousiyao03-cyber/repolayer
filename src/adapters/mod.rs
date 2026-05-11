@@ -6,23 +6,23 @@
 //! they are dispatched separately by the indexer.
 
 pub mod base;
-pub mod python;
-pub mod typescript;
-pub mod go;
-pub mod rust;
 pub mod csharp;
+pub mod go;
+pub mod idl;
 pub mod java;
 pub mod kotlin;
-pub mod scala;
 pub mod markdown;
-pub mod idl;
+pub mod python;
+pub mod rust;
+pub mod scala;
+pub mod typescript;
 
-use std::path::{Path, PathBuf};
-use ast_grep_core::Language;
-use ast_grep_language::{LanguageExt, SupportLang};
 use crate::core::declaration::ParseResult;
 use crate::core::populate_markers;
+use ast_grep_core::Language;
+use ast_grep_language::{LanguageExt, SupportLang};
 use base::LanguageAdapter;
+use std::path::{Path, PathBuf};
 
 /// Parse a single file, returning a `ParseResult` if the extension is
 /// supported by any adapter. Returns `None` for unknown extensions.
@@ -79,11 +79,7 @@ pub fn walk_and_parse(paths: &[PathBuf], glob_str: Option<&str>) -> Vec<ParseRes
     }
 
     // Filter out paths that don't exist.
-    let existing: Vec<PathBuf> = paths
-        .iter()
-        .filter(|p| p.exists())
-        .cloned()
-        .collect();
+    let existing: Vec<PathBuf> = paths.iter().filter(|p| p.exists()).cloned().collect();
     if existing.is_empty() {
         return Vec::new();
     }

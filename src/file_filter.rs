@@ -24,16 +24,35 @@ use std::path::Path;
 ///   - have a stable, conventional name
 pub const HARDCODED_IGNORE_DIRS: &[&str] = &[
     // VCS
-    ".git", ".hg", ".svn", ".jj",
+    ".git",
+    ".hg",
+    ".svn",
+    ".jj",
     // Python
-    "__pycache__", ".venv", "venv", ".tox",
-    ".mypy_cache", ".pytest_cache", ".ruff_cache",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".tox",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
     // JS/TS
-    "node_modules", ".next", ".nuxt", ".turbo", ".parcel-cache",
+    "node_modules",
+    ".next",
+    ".nuxt",
+    ".turbo",
+    ".parcel-cache",
     // Build outputs
-    "dist", "build", "out", ".eggs", "target",
+    "dist",
+    "build",
+    "out",
+    ".eggs",
+    "target",
     // Other
-    ".cache", ".gradle", ".idea", ".vscode",
+    ".cache",
+    ".gradle",
+    ".idea",
+    ".vscode",
     // Self
     ".ast-outline",
 ];
@@ -73,7 +92,10 @@ mod tests {
     #[test]
     fn skip_node_modules_anywhere() {
         let root = PathBuf::from("/r");
-        assert!(should_skip_path(&root.join("node_modules/lodash/index.js"), &root));
+        assert!(should_skip_path(
+            &root.join("node_modules/lodash/index.js"),
+            &root
+        ));
         assert!(should_skip_path(
             &root.join("packages/foo/node_modules/lib.js"),
             &root,
@@ -83,13 +105,19 @@ mod tests {
     #[test]
     fn skip_target_dir() {
         let root = PathBuf::from("/r");
-        assert!(should_skip_path(&root.join("target/debug/build/x.rs"), &root));
+        assert!(should_skip_path(
+            &root.join("target/debug/build/x.rs"),
+            &root
+        ));
     }
 
     #[test]
     fn skip_self_managed_index() {
         let root = PathBuf::from("/r");
-        assert!(should_skip_path(&root.join(".ast-outline/index/meta.json"), &root));
+        assert!(should_skip_path(
+            &root.join(".ast-outline/index/meta.json"),
+            &root
+        ));
     }
 
     #[test]
@@ -103,6 +131,9 @@ mod tests {
     fn allow_paths_outside_root() {
         let root = PathBuf::from("/r");
         // strip_prefix fails → not skipped (let caller decide).
-        assert!(!should_skip_path(&PathBuf::from("/elsewhere/node_modules/x"), &root));
+        assert!(!should_skip_path(
+            &PathBuf::from("/elsewhere/node_modules/x"),
+            &root
+        ));
     }
 }

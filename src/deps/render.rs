@@ -98,8 +98,7 @@ pub fn render_graph_text(graph: &DepGraph) -> String {
     let _ = writeln!(
         out,
         "{}",
-        format!("{} files, {} edges", graph.stats.file_count, edges.len())
-            .dimmed()
+        format!("{} files, {} edges", graph.stats.file_count, edges.len()).dimmed()
     );
     let mut grouped: BTreeMap<String, Vec<(String, ImportKind)>> = BTreeMap::new();
     for (s, t, k) in edges {
@@ -131,12 +130,7 @@ pub fn render_graph_dot(graph: &DepGraph) -> String {
         let _ = writeln!(out, "  \"{}\";", graph.rel(&f));
     }
     for (s, t, _k) in edges {
-        let _ = writeln!(
-            out,
-            "  \"{}\" -> \"{}\";",
-            graph.rel(&s),
-            graph.rel(&t)
-        );
+        let _ = writeln!(out, "  \"{}\" -> \"{}\";", graph.rel(&s), graph.rel(&t));
     }
     out.push_str("}\n");
     out
@@ -148,7 +142,9 @@ pub fn render_graph_dsm(graph: &DepGraph, dsm: &Dsm) -> String {
     let _ = writeln!(
         out,
         "{}",
-        format!("DSM ({} files, sorted by Lakos level):", n).cyan().bold()
+        format!("DSM ({} files, sorted by Lakos level):", n)
+            .cyan()
+            .bold()
     );
     let _ = writeln!(out);
     let labels: Vec<String> = dsm.files.iter().map(|f| graph.rel(f)).collect();

@@ -13,8 +13,12 @@ fn parse_rust(src: &str) -> repolayer::core::declaration::ParseResult {
 /// Find first declaration anywhere in the tree (top-level or nested) by name.
 fn find_named<'a>(decls: &'a [Declaration], name: &str) -> Option<&'a Declaration> {
     for d in decls {
-        if d.name == name { return Some(d); }
-        if let Some(x) = find_named(&d.children, name) { return Some(x); }
+        if d.name == name {
+            return Some(d);
+        }
+        if let Some(x) = find_named(&d.children, name) {
+            return Some(x);
+        }
     }
     None
 }
@@ -32,9 +36,17 @@ fn parses_trait_with_methods() {
     let r = parse_rust(src);
     let g = find_named(&r.declarations, "Greeter").expect("Greeter");
     // aeroxy maps Rust `trait` to canonical Interface kind.
-    assert!(matches!(g.kind, DeclarationKind::Interface), "got {:?}", g.kind);
+    assert!(
+        matches!(g.kind, DeclarationKind::Interface),
+        "got {:?}",
+        g.kind
+    );
     let methods: Vec<_> = g.children.iter().map(|c| c.name.clone()).collect();
-    assert!(methods.contains(&"greet".to_string()), "Greeter children: {:?}", methods);
+    assert!(
+        methods.contains(&"greet".to_string()),
+        "Greeter children: {:?}",
+        methods
+    );
 }
 
 #[test]
@@ -43,6 +55,14 @@ fn parses_impl_block_groups_methods_under_struct() {
     let r = parse_rust(src);
     let u = find_named(&r.declarations, "U").expect("U");
     let methods: Vec<_> = u.children.iter().map(|c| c.name.clone()).collect();
-    assert!(methods.contains(&"new".to_string()), "U children: {:?}", methods);
-    assert!(methods.contains(&"name".to_string()), "U children: {:?}", methods);
+    assert!(
+        methods.contains(&"new".to_string()),
+        "U children: {:?}",
+        methods
+    );
+    assert!(
+        methods.contains(&"name".to_string()),
+        "U children: {:?}",
+        methods
+    );
 }

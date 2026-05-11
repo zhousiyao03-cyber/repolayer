@@ -14,8 +14,7 @@ pub async fn run(path: PathBuf, json: bool) -> Result<()> {
     } else {
         canonical.clone()
     };
-    let workspace_root =
-        super::deps::find_workspace_root(&workspace).unwrap_or(workspace);
+    let workspace_root = super::deps::find_workspace_root(&workspace).unwrap_or(workspace);
 
     let g = super::load_or_build_dep_graph(&workspace_root)?;
 

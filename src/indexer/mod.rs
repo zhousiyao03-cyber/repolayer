@@ -1,10 +1,10 @@
 pub mod incremental;
 
 use crate::config::Config;
+use crate::deps::store::DepStore;
 use crate::graph::model::*;
 use crate::graph::store::Store;
 use crate::outline::store::OutlineStore;
-use crate::deps::store::DepStore;
 use crate::search::store::SearchStore;
 use anyhow::{Context, Result};
 use ignore::WalkBuilder;
@@ -149,7 +149,10 @@ impl Indexer {
                 let chunks = crate::search::chunker::chunk_file(&abs, rel);
                 all_chunks.extend(chunks);
             }
-            if let Err(e) = self.search_store.replace_repo_chunks(repo_name, &all_chunks) {
+            if let Err(e) = self
+                .search_store
+                .replace_repo_chunks(repo_name, &all_chunks)
+            {
                 warn!("search_store write failed for {}: {}", repo_name, e);
             }
         }
@@ -329,7 +332,8 @@ impl Indexer {
 
             // Outline store: upsert (repo, path) row with full Declaration tree
             let content_hash = hash_source(&parse_result.source);
-            self.outline_store.upsert(repo, &parse_result, &content_hash)?;
+            self.outline_store
+                .upsert(repo, &parse_result, &content_hash)?;
         }
 
         Ok(())
@@ -477,7 +481,8 @@ impl Indexer {
 
         // ── Re-write outline.db ──────────────────────────────────────────────
         let content_hash = hash_source(&parse_result.source);
-        self.outline_store.upsert(repo, &parse_result, &content_hash)?;
+        self.outline_store
+            .upsert(repo, &parse_result, &content_hash)?;
 
         Ok(())
     }

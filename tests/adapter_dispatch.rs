@@ -40,7 +40,10 @@ fn dispatches_markdown() {
     let f = write_temp(".md", "# Title\n\n## Section\n");
     let r = parse_file(f.path()).expect("parsed");
     assert_eq!(r.language, "markdown");
-    assert!(r.declarations.iter().any(|d| matches!(d.kind, DeclarationKind::Heading)));
+    assert!(r
+        .declarations
+        .iter()
+        .any(|d| matches!(d.kind, DeclarationKind::Heading)));
 }
 
 #[test]

@@ -9,9 +9,7 @@ use std::path::Path;
 use crate::core::declaration::{
     Declaration, DeclarationKind, DigestOptions, OutlineOptions, ParseResult,
 };
-use crate::core::schema::{
-    JSON_SCHEMA_IMPLEMENTS, JSON_SCHEMA_OUTLINE, JSON_SCHEMA_SHOW,
-};
+use crate::core::schema::{JSON_SCHEMA_IMPLEMENTS, JSON_SCHEMA_OUTLINE, JSON_SCHEMA_SHOW};
 
 /// One-line legend printed above every `digest` output. Tells the
 /// reader (usually an agent) how to decode the compact symbol forms.
@@ -27,7 +25,6 @@ fn _size_label(line_count: usize) -> &'static str {
         _ => "xlarge",
     }
 }
-
 
 pub fn render_outline(result: &ParseResult, opts: &OutlineOptions) -> String {
     let mut lines = vec![_format_file_header(
@@ -279,10 +276,7 @@ fn _digest_one(result: &ParseResult, opts: &DigestOptions) -> Vec<String> {
         }
         // Prefer `native_kind` (`trait`, `case class`, `data class`, …)
         // when the adapter set it; fall back to the canonical kind.
-        let kind_str = t
-            .native_kind
-            .as_deref()
-            .unwrap_or(t.kind.as_str());
+        let kind_str = t.native_kind.as_deref().unwrap_or(t.kind.as_str());
         // Modifiers (abstract / sealed / final / partial / …) — but skip
         // ones the native_kind already names, so we don't render
         // "sealed sealed class" for `sealed class Foo`.
@@ -322,8 +316,7 @@ fn _digest_one(result: &ParseResult, opts: &DigestOptions) -> Vec<String> {
 
     if !free_functions.is_empty() {
         let collapsed = _collapse_overloads(free_functions.iter().map(|d| (*d).clone()).collect());
-        let shown =
-            &collapsed[..std::cmp::min(collapsed.len(), opts.max_members_per_type)];
+        let shown = &collapsed[..std::cmp::min(collapsed.len(), opts.max_members_per_type)];
         let tokens: Vec<String> = shown.iter().map(_format_member_token).collect();
         lines.extend(_wrap_tokens(&tokens, 100, "    "));
     }
@@ -429,9 +422,13 @@ fn _format_inline_attrs(attrs: &[String]) -> String {
     if joined.len() > 40 {
         // Fall back to a short marker so the reader knows attrs exist
         // without flooding the line.
-        return format!("[{}attr{}]", attrs.len(), if attrs.len() == 1 { "" } else { "s" })
-            .dimmed()
-            .to_string();
+        return format!(
+            "[{}attr{}]",
+            attrs.len(),
+            if attrs.len() == 1 { "" } else { "s" }
+        )
+        .dimmed()
+        .to_string();
     }
     joined.dimmed().to_string()
 }

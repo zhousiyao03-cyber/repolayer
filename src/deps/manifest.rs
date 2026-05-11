@@ -210,9 +210,7 @@ fn detect_rust_packages(root: &std::path::Path) -> Vec<RustPackage> {
                     let member_root = root.join(member_str);
                     let member_cargo = member_root.join("Cargo.toml");
                     if let Ok(member_content) = std::fs::read_to_string(&member_cargo) {
-                        if let Ok(member_doc) =
-                            toml_edit::DocumentMut::from_str(&member_content)
-                        {
+                        if let Ok(member_doc) = toml_edit::DocumentMut::from_str(&member_content) {
                             if let Some(name) = member_doc
                                 .get("package")
                                 .and_then(|p| p.as_table())

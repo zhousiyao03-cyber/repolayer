@@ -176,13 +176,27 @@ fn pack(source: &str, file_path: &str, lang_name: &str, split_points: &[usize]) 
         } else if cur_size + region_size <= MAX_CHARS {
             cur_end = w[1];
         } else {
-            push_chunk(source, file_path, lang_name, cur_start, cur_end, &mut chunks);
+            push_chunk(
+                source,
+                file_path,
+                lang_name,
+                cur_start,
+                cur_end,
+                &mut chunks,
+            );
             cur_start = w[0];
             cur_end = w[1];
         }
     }
     if cur_end > cur_start {
-        push_chunk(source, file_path, lang_name, cur_start, cur_end, &mut chunks);
+        push_chunk(
+            source,
+            file_path,
+            lang_name,
+            cur_start,
+            cur_end,
+            &mut chunks,
+        );
     }
 
     chunks
@@ -304,7 +318,11 @@ mod tests {
             "fn one() {{\n{big_body}}}\nfn two() {{\n{big_body}}}\nfn three() {{\n{big_body}}}\n"
         );
         let chunks = rust(&src);
-        assert!(chunks.len() >= 2, "expected packer to split, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 2,
+            "expected packer to split, got {}",
+            chunks.len()
+        );
         for c in &chunks {
             assert!(!c.content.trim().is_empty());
         }
@@ -376,7 +394,11 @@ content c
         let big: String = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(40);
         let src = format!("# A\n{big}\n\n# B\n{big}\n\n# C\n{big}\n");
         let chunks = md(&src);
-        assert!(chunks.len() >= 2, "expected splitting, got {}", chunks.len());
+        assert!(
+            chunks.len() >= 2,
+            "expected splitting, got {}",
+            chunks.len()
+        );
     }
 
     #[test]

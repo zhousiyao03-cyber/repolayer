@@ -115,13 +115,24 @@ fn _modifiers(d: &Declaration, lang: &str) -> Vec<String> {
         "rust" => &["async", "unsafe", "const", "extern"],
         "python" => &["async"],
         "typescript" => &["async", "static", "abstract", "readonly", "override"],
-        "java" => &["static", "abstract", "final", "synchronized", "default", "native"],
+        "java" => &[
+            "static",
+            "abstract",
+            "final",
+            "synchronized",
+            "default",
+            "native",
+        ],
         "kotlin" => &[
             "suspend", "open", "inner", "value", "inline", "infix", "tailrec", "operator",
             "abstract", "override", "sealed", "final",
         ],
-        "scala" => &["sealed", "final", "abstract", "implicit", "inline", "lazy", "override"],
-        "csharp" => &["partial", "sealed", "static", "abstract", "virtual", "override", "async"],
+        "scala" => &[
+            "sealed", "final", "abstract", "implicit", "inline", "lazy", "override",
+        ],
+        "csharp" => &[
+            "partial", "sealed", "static", "abstract", "virtual", "override", "async",
+        ],
         _ => &[],
     };
     if want.is_empty() {
@@ -133,7 +144,14 @@ fn _modifiers(d: &Declaration, lang: &str) -> Vec<String> {
         "rust" => &["fn", "trait", "struct", "enum", "impl", "type", "mod"],
         "python" => &["def", "class"],
         "typescript" => &[
-            "function", "class", "interface", "enum", "type", "const", "let", "var",
+            "function",
+            "class",
+            "interface",
+            "enum",
+            "type",
+            "const",
+            "let",
+            "var",
         ],
         "java" => &["class", "interface", "enum", "record", "void"],
         "kotlin" => &["fun", "class", "interface", "object", "enum", "val", "var"],

@@ -7,8 +7,8 @@ pub async fn run(file: PathBuf, symbols: Vec<String>, json: bool) -> Result<()> 
     use crate::adapters::parse_file;
     use crate::outline::render::{find_symbols, render_json_show};
 
-    let pr = parse_file(&file)
-        .ok_or_else(|| anyhow::anyhow!("no adapter for {}", file.display()))?;
+    let pr =
+        parse_file(&file).ok_or_else(|| anyhow::anyhow!("no adapter for {}", file.display()))?;
 
     if json {
         let mut all_matches = Vec::new();
@@ -30,7 +30,10 @@ pub async fn run(file: PathBuf, symbols: Vec<String>, json: bool) -> Result<()> 
         }
         for m in matches {
             any_found = true;
-            println!("// {} (lines {}-{})", m.qualified_name, m.start_line, m.end_line);
+            println!(
+                "// {} (lines {}-{})",
+                m.qualified_name, m.start_line, m.end_line
+            );
             println!("{}", m.source);
         }
     }

@@ -73,7 +73,10 @@ fn build_aliases(workspace_root: &Path, config: &Config) -> Vec<RepoAlias> {
         }
 
         if !prefixes.is_empty() {
-            out.push(RepoAlias { repo_name, prefixes });
+            out.push(RepoAlias {
+                repo_name,
+                prefixes,
+            });
         }
     }
     out
@@ -152,9 +155,9 @@ pub fn link(
 
         // Find the source file's owning workspace root so we can compute
         // a stable relative path for the module node.
-        let root = repo_roots.iter().find_map(|(n, r)| {
-            (*n == from_repo).then_some(r.as_path())
-        });
+        let root = repo_roots
+            .iter()
+            .find_map(|(n, r)| (*n == from_repo).then_some(r.as_path()));
         let Some(root) = root else { continue };
         let rel = relpath(Path::new(&from_abs), root);
 

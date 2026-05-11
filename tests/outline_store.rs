@@ -55,7 +55,9 @@ fn upsert_replaces_on_same_key() {
 fn delete_removes_row() {
     let dir = tempdir().unwrap();
     let store = OutlineStore::open(&dir.path().join("outline.db")).unwrap();
-    store.upsert("repo1", &make_parse_result(), &[0u8; 32]).unwrap();
+    store
+        .upsert("repo1", &make_parse_result(), &[0u8; 32])
+        .unwrap();
     store.delete("repo1", "src/foo.rs").unwrap();
     assert!(store.get("repo1", "src/foo.rs").unwrap().is_none());
 }

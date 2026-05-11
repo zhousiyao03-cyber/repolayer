@@ -73,10 +73,8 @@ impl DepStore {
     }
 
     pub fn replace_repo_graph(&self, repo: &str, g: &DepGraph) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM forward_edges WHERE repo = ?1",
-            params![repo],
-        )?;
+        self.conn
+            .execute("DELETE FROM forward_edges WHERE repo = ?1", params![repo])?;
         self.conn.execute(
             "DELETE FROM external_imports WHERE repo = ?1",
             params![repo],
@@ -144,9 +142,9 @@ impl DepStore {
                 .push(edge);
         }
         // external imports
-        let mut stmt = self.conn.prepare(
-            "SELECT from_path, raw FROM external_imports WHERE repo = ?1",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT from_path, raw FROM external_imports WHERE repo = ?1")?;
         let rows = stmt.query_map(params![repo], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;

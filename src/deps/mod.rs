@@ -108,7 +108,10 @@ pub struct FileDepResult {
 ///
 /// Used by `repolayer update` so we don't re-extract every file in the repo
 /// just because one changed.
-pub fn build_for_files(root: &Path, files: &[std::path::PathBuf]) -> Result<Vec<FileDepResult>, DepError> {
+pub fn build_for_files(
+    root: &Path,
+    files: &[std::path::PathBuf],
+) -> Result<Vec<FileDepResult>, DepError> {
     let aliases = detect_aliases(root);
     let idx = build_suffix_index(root);
 

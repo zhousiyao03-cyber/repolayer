@@ -25,20 +25,40 @@ const FILE_SATURATION_THRESHOLD: usize = 1;
 const FILE_SATURATION_DECAY: f32 = 0.5;
 
 const STOPWORDS: &[&str] = &[
-    "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for", "from",
-    "has", "have", "how", "if", "in", "is", "it", "not", "of", "on", "or", "the",
-    "to", "was", "what", "when", "where", "which", "who", "why", "with",
+    "a", "an", "and", "are", "as", "at", "be", "by", "do", "does", "for", "from", "has", "have",
+    "how", "if", "in", "is", "it", "not", "of", "on", "or", "the", "to", "was", "what", "when",
+    "where", "which", "who", "why", "with",
 ];
 
 const DEFINITION_KEYWORDS: &[&str] = &[
-    "class", "module", "defmodule", "def", "interface", "struct", "enum",
-    "trait", "type", "func", "function", "object", "abstract class",
-    "data class", "fn", "fun", "package", "namespace", "protocol",
-    "record", "typedef",
+    "class",
+    "module",
+    "defmodule",
+    "def",
+    "interface",
+    "struct",
+    "enum",
+    "trait",
+    "type",
+    "func",
+    "function",
+    "object",
+    "abstract class",
+    "data class",
+    "fn",
+    "fun",
+    "package",
+    "namespace",
+    "protocol",
+    "record",
+    "typedef",
 ];
 
 const SQL_DEFINITION_KEYWORDS: &[&str] = &[
-    "CREATE TABLE", "CREATE VIEW", "CREATE PROCEDURE", "CREATE FUNCTION",
+    "CREATE TABLE",
+    "CREATE VIEW",
+    "CREATE PROCEDURE",
+    "CREATE FUNCTION",
 ];
 
 const REEXPORT_FILENAMES: &[&str] = &["__init__.py", "package-info.java"];
@@ -72,34 +92,72 @@ fn test_file_re() -> &'static Regex {
         let pattern = concat!(
             r"(?:^|/)(?:",
             // Python
-            r"test_[^/]*\.py", "|", r"[^/]*_test\.py",
+            r"test_[^/]*\.py",
+            "|",
+            r"[^/]*_test\.py",
             // Go
-            "|", r"[^/]*_test\.go",
+            "|",
+            r"[^/]*_test\.go",
             // Java
-            "|", r"[^/]*Tests?\.java",
+            "|",
+            r"[^/]*Tests?\.java",
             // PHP
-            "|", r"[^/]*Test\.php",
+            "|",
+            r"[^/]*Test\.php",
             // Ruby
-            "|", r"[^/]*_spec\.rb", "|", r"[^/]*_test\.rb",
+            "|",
+            r"[^/]*_spec\.rb",
+            "|",
+            r"[^/]*_test\.rb",
             // JS/TS
-            "|", r"[^/]*\.test\.[jt]sx?", "|", r"[^/]*\.spec\.[jt]sx?",
+            "|",
+            r"[^/]*\.test\.[jt]sx?",
+            "|",
+            r"[^/]*\.spec\.[jt]sx?",
             // Kotlin
-            "|", r"[^/]*Tests?\.kt", "|", r"[^/]*Spec\.kt",
+            "|",
+            r"[^/]*Tests?\.kt",
+            "|",
+            r"[^/]*Spec\.kt",
             // Swift
-            "|", r"[^/]*Tests?\.swift", "|", r"[^/]*Spec\.swift",
+            "|",
+            r"[^/]*Tests?\.swift",
+            "|",
+            r"[^/]*Spec\.swift",
             // C#
-            "|", r"[^/]*Tests?\.cs",
+            "|",
+            r"[^/]*Tests?\.cs",
             // C / C++
-            "|", r"test_[^/]*\.cpp", "|", r"[^/]*_test\.cpp",
-            "|", r"test_[^/]*\.c", "|", r"[^/]*_test\.c",
+            "|",
+            r"test_[^/]*\.cpp",
+            "|",
+            r"[^/]*_test\.cpp",
+            "|",
+            r"test_[^/]*\.c",
+            "|",
+            r"[^/]*_test\.c",
             // Scala
-            "|", r"[^/]*Spec\.scala", "|", r"[^/]*Suite\.scala", "|", r"[^/]*Test\.scala",
+            "|",
+            r"[^/]*Spec\.scala",
+            "|",
+            r"[^/]*Suite\.scala",
+            "|",
+            r"[^/]*Test\.scala",
             // Dart
-            "|", r"[^/]*_test\.dart", "|", r"test_[^/]*\.dart",
+            "|",
+            r"[^/]*_test\.dart",
+            "|",
+            r"test_[^/]*\.dart",
             // Lua
-            "|", r"[^/]*_spec\.lua", "|", r"[^/]*_test\.lua", "|", r"test_[^/]*\.lua",
+            "|",
+            r"[^/]*_spec\.lua",
+            "|",
+            r"[^/]*_test\.lua",
+            "|",
+            r"test_[^/]*\.lua",
             // Helpers
-            "|", r"test_helpers?[^/]*\.\w+",
+            "|",
+            r"test_helpers?[^/]*\.\w+",
             ")$",
         );
         Regex::new(pattern).expect("test_file_re")
@@ -147,9 +205,7 @@ fn definition_pattern(symbol_name: &str) -> DefnPair {
     // whitespace into the match, which is fine because we only need a match,
     // not the offset.
     let prefix = r"(?:^|\s)(?:";
-    let suffix = format!(
-        r")\s+(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|::))*{escaped}(?:\s|[<({{:\[;]|$)",
-    );
+    let suffix = format!(r")\s+(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|::))*{escaped}(?:\s|[<({{:\[;]|$)",);
     let general_body: String = DEFINITION_KEYWORDS
         .iter()
         .map(|k| regex::escape(k))
@@ -276,7 +332,9 @@ fn definition_tier(content: &str, file_path: &str, names: &[&str], boost_unit: f
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let stem_match = names.iter().any(|n| stem_matches(&stem, &n.to_ascii_lowercase()));
+    let stem_match = names
+        .iter()
+        .any(|n| stem_matches(&stem, &n.to_ascii_lowercase()));
     boost_unit * if stem_match { 1.5 } else { 1.0 }
 }
 
@@ -340,8 +398,7 @@ fn boost_embedded_symbols(
         return;
     }
     let names_ref: Vec<&str> = names.iter().map(String::as_str).collect();
-    let boost_unit =
-        max_score * DEFINITION_BOOST_MULTIPLIER * EMBEDDED_SYMBOL_BOOST_SCALE;
+    let boost_unit = max_score * DEFINITION_BOOST_MULTIPLIER * EMBEDDED_SYMBOL_BOOST_SCALE;
 
     let candidate_ids: Vec<u32> = boosted.keys().copied().collect();
     for id in &candidate_ids {
@@ -426,7 +483,11 @@ fn boost_stem_matches(
             let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
             parts.insert(stem.to_ascii_lowercase());
             parts.extend(split_identifier(stem));
-            if let Some(parent) = p.parent().and_then(|d| d.file_name()).and_then(|s| s.to_str()) {
+            if let Some(parent) = p
+                .parent()
+                .and_then(|d| d.file_name())
+                .and_then(|s| s.to_str())
+            {
                 if !matches!(parent, "" | "." | "/" | "..") {
                     parts.insert(parent.to_ascii_lowercase());
                     parts.extend(split_identifier(parent));
@@ -504,9 +565,7 @@ pub fn rerank_topk(
 
     // Sort by penalised score descending (stable on ties — preserves insertion
     // order, matching Python's stable `sorted`).
-    penalised.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
-    });
+    penalised.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Greedy selection with file-saturation decay. We only need to walk far
     // enough to find top_k results that survive the decay.
@@ -533,10 +592,12 @@ pub fn rerank_topk(
         }
     }
 
-    selected.sort_by(|a, b| {
-        b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)
-    });
-    selected.into_iter().take(top_k).map(|(s, id)| (id, s)).collect()
+    selected.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    selected
+        .into_iter()
+        .take(top_k)
+        .map(|(s, id)| (id, s))
+        .collect()
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -578,9 +639,9 @@ mod tests {
     #[test]
     fn stem_matches_variants() {
         assert!(stem_matches("foo", "foo"));
-        assert!(stem_matches("my_func", "myfunc"));   // snake collapsed
-        assert!(stem_matches("foos", "foo"));          // plural
-        assert!(stem_matches("my_funcs", "myfunc"));   // plural + snake
+        assert!(stem_matches("my_func", "myfunc")); // snake collapsed
+        assert!(stem_matches("foos", "foo")); // plural
+        assert!(stem_matches("my_funcs", "myfunc")); // plural + snake
         assert!(!stem_matches("bar", "foo"));
     }
 
@@ -595,13 +656,22 @@ mod tests {
 
     #[test]
     fn defines_namespaced() {
-        assert!(chunk_defines_symbol("defmodule Phoenix.Router do\nend", "Router"));
+        assert!(chunk_defines_symbol(
+            "defmodule Phoenix.Router do\nend",
+            "Router"
+        ));
     }
 
     #[test]
     fn defines_sql_case_insensitive() {
-        assert!(chunk_defines_symbol("CREATE TABLE users (id INT);", "users"));
-        assert!(chunk_defines_symbol("create table Users (id int);", "Users"));
+        assert!(chunk_defines_symbol(
+            "CREATE TABLE users (id INT);",
+            "users"
+        ));
+        assert!(chunk_defines_symbol(
+            "create table Users (id int);",
+            "Users"
+        ));
     }
 
     #[test]
@@ -666,10 +736,7 @@ mod tests {
 
     #[test]
     fn rerank_applies_path_penalties() {
-        let chunks = vec![
-            ck(0, "src/main.rs", ""),
-            ck(1, "tests/test_foo.py", ""),
-        ];
+        let chunks = vec![ck(0, "src/main.rs", ""), ck(1, "tests/test_foo.py", "")];
         let scores: HashMap<u32, f32> = [(0u32, 1.0f32), (1u32, 1.5f32)].into_iter().collect();
         // Without penalties, id 1 wins.
         let no_pen = rerank_topk(&scores, &chunks, 2, /* penalise_paths */ false);
@@ -717,8 +784,8 @@ mod tests {
     #[test]
     fn boost_promotes_definition_for_symbol_query() {
         let chunks = vec![
-            ck(0, "src/handler.rs", "fn use_handler() { stack.handle() }"),  // uses
-            ck(1, "src/stack.rs", "struct HandlerStack { items: Vec<u32> }"),  // defines
+            ck(0, "src/handler.rs", "fn use_handler() { stack.handle() }"), // uses
+            ck(1, "src/stack.rs", "struct HandlerStack { items: Vec<u32> }"), // defines
         ];
         let scores: HashMap<u32, f32> = [(0u32, 0.5f32), (1u32, 0.3f32)].into_iter().collect();
         let boosted = apply_query_boost(scores, "HandlerStack", &chunks);

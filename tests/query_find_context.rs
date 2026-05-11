@@ -109,17 +109,28 @@ fn find_context_has_schema_version() {
 fn find_context_items_have_match_source_and_confidence() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
-    let n = Node::new(NodeKind::Function, "r", "src/auth.ts", Some("authenticateUser"));
+    let n = Node::new(
+        NodeKind::Function,
+        "r",
+        "src/auth.ts",
+        Some("authenticateUser"),
+    );
     store.upsert_node(&n).unwrap();
     let result = find_context(&store, None, "authenticate user", 5000).unwrap();
     assert!(!result.items.is_empty(), "should have at least one result");
     let item = &result.items[0];
-    assert_eq!(item.match_source, "substring", "substring is the only active path");
+    assert_eq!(
+        item.match_source, "substring",
+        "substring is the only active path"
+    );
     assert!(
         item.confidence >= 0.0 && item.confidence <= 1.0,
         "confidence must be in [0, 1]"
     );
-    assert!(item.estimated_tokens > 0, "estimated_tokens must be positive");
+    assert!(
+        item.estimated_tokens > 0,
+        "estimated_tokens must be positive"
+    );
 }
 
 #[test]
@@ -127,7 +138,12 @@ fn find_context_cross_repo_edges_empty_when_no_cross_edges() {
     let dir = tempdir().unwrap();
     let store = Store::open(&dir.path().join("index.db")).unwrap();
     // Single isolated node, no edges
-    let n = Node::new(NodeKind::Function, "repo_a", "src/handler.ts", Some("handleRequest"));
+    let n = Node::new(
+        NodeKind::Function,
+        "repo_a",
+        "src/handler.ts",
+        Some("handleRequest"),
+    );
     store.upsert_node(&n).unwrap();
     let result = find_context(&store, None, "handle request", 5000).unwrap();
     assert!(!result.items.is_empty());
@@ -143,8 +159,18 @@ fn find_context_cross_repo_edges_populated_for_cross_repo_imports() {
     let store = Store::open(&dir.path().join("index.db")).unwrap();
 
     // Use Function nodes with symbols so search_symbols_substring can find them.
-    let src = Node::new(NodeKind::Function, "repo_a", "src/client.ts", Some("clientFetch"));
-    let dst = Node::new(NodeKind::Function, "repo_b", "src/server.ts", Some("serverHandler"));
+    let src = Node::new(
+        NodeKind::Function,
+        "repo_a",
+        "src/client.ts",
+        Some("clientFetch"),
+    );
+    let dst = Node::new(
+        NodeKind::Function,
+        "repo_b",
+        "src/server.ts",
+        Some("serverHandler"),
+    );
     store.upsert_node(&src).unwrap();
     store.upsert_node(&dst).unwrap();
 
@@ -181,8 +207,18 @@ fn find_context_same_repo_edges_not_in_cross_repo() {
     let store = Store::open(&dir.path().join("index.db")).unwrap();
 
     // Two Function nodes in the SAME repo, both discoverable by substring search
-    let src = Node::new(NodeKind::Function, "repo_a", "src/a.ts", Some("intraFuncAlpha"));
-    let dst = Node::new(NodeKind::Function, "repo_a", "src/b.ts", Some("intraFuncBeta"));
+    let src = Node::new(
+        NodeKind::Function,
+        "repo_a",
+        "src/a.ts",
+        Some("intraFuncAlpha"),
+    );
+    let dst = Node::new(
+        NodeKind::Function,
+        "repo_a",
+        "src/b.ts",
+        Some("intraFuncBeta"),
+    );
     store.upsert_node(&src).unwrap();
     store.upsert_node(&dst).unwrap();
 
@@ -233,9 +269,8 @@ fn find_context_uses_search_lane_for_synonym_matches() {
 
     let search_store = SearchStore::open(&dir.path().join("search.db")).unwrap();
     let chunk = Chunk {
-        content:
-            "function handleHttpRequest(req) { authenticate(req); validateUser(req.user); }"
-                .to_string(),
+        content: "function handleHttpRequest(req) { authenticate(req); validateUser(req.user); }"
+            .to_string(),
         file_path: "src/server.ts".to_string(),
         start_line: 10,
         end_line: 20,
@@ -243,12 +278,9 @@ fn find_context_uses_search_lane_for_synonym_matches() {
         end_byte: 80,
         language: "typescript".to_string(),
     };
-    search_store
-        .insert_file_chunks("repo_a", &[chunk])
-        .unwrap();
+    search_store.insert_file_chunks("repo_a", &[chunk]).unwrap();
 
-    let result =
-        find_context(&store, Some(&search_store), "user authentication", 5000).unwrap();
+    let result = find_context(&store, Some(&search_store), "user authentication", 5000).unwrap();
     let found = result
         .items
         .iter()

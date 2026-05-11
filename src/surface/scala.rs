@@ -250,7 +250,10 @@ fn _index_children(
 
 fn _is_object_like(d: &Declaration) -> bool {
     use DeclarationKind::*;
-    matches!(d.kind, Class | Interface | Struct | Record | Enum | Namespace)
+    matches!(
+        d.kind,
+        Class | Interface | Struct | Record | Enum | Namespace
+    )
 }
 
 fn _is_public(d: &Declaration) -> bool {

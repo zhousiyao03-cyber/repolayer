@@ -107,7 +107,13 @@ pub async fn run(path: PathBuf, depth: usize, json: bool) -> Result<()> {
             } else {
                 String::new()
             };
-            println!("{} -> {} [{}{}]", from.display(), to.display(), kind, line_suffix);
+            println!(
+                "{} -> {} [{}{}]",
+                from.display(),
+                to.display(),
+                kind,
+                line_suffix
+            );
         }
         if all_edges.is_empty() {
             eprintln!("no dependencies found for {}", canonical.display());

@@ -84,12 +84,7 @@ fn render_hit_body(hit: &SearchHit) -> String {
     out
 }
 
-pub fn render_related_json(
-    file_path: &str,
-    line: u32,
-    hits: &[SearchHit],
-    pretty: bool,
-) -> String {
+pub fn render_related_json(file_path: &str, line: u32, hits: &[SearchHit], pretty: bool) -> String {
     let v = json!({
         "schema": JSON_SCHEMA_RELATED,
         "source": { "path": file_path, "line": line },
@@ -221,7 +216,10 @@ mod tests {
         let meta = Meta {
             schema: "ast-outline.search-index.v1".to_string(),
             ast_outline_version: "0.0.0".to_string(),
-            model: ModelMeta { id: "m".into(), dim: 256 },
+            model: ModelMeta {
+                id: "m".into(),
+                dim: 256,
+            },
             created_unix: 42,
             chunk_count: 7,
             embedding_dtype: "f32_le".to_string(),

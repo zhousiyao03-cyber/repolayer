@@ -1,5 +1,5 @@
-use repolayer::deps::resolver::{build_suffix_index, resolve, ResolveCtx};
 use repolayer::deps::resolver::build::Lang;
+use repolayer::deps::resolver::{build_suffix_index, resolve, ResolveCtx};
 use std::fs;
 use tempfile::tempdir;
 
@@ -50,7 +50,11 @@ fn resolves_rust_crate_import() {
 fn returns_none_for_unresolvable_import() {
     let d = tempdir().unwrap();
     fs::create_dir_all(d.path().join("src")).unwrap();
-    fs::write(d.path().join("src/bar.ts"), "import { x } from 'nonexistent-pkg';\n").unwrap();
+    fs::write(
+        d.path().join("src/bar.ts"),
+        "import { x } from 'nonexistent-pkg';\n",
+    )
+    .unwrap();
 
     let idx = build_suffix_index(d.path());
     let from = d.path().join("src/bar.ts");

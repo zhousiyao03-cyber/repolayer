@@ -8,16 +8,14 @@ pub async fn run(path: Option<PathBuf>, json: bool) -> Result<()> {
     use crate::core::schema::JSON_SCHEMA_CYCLES;
 
     let workspace = path.unwrap_or_else(|| std::env::current_dir().unwrap());
-    let workspace_root =
-        super::deps::find_workspace_root(&workspace).unwrap_or(workspace);
+    let workspace_root = super::deps::find_workspace_root(&workspace).unwrap_or(workspace);
 
     let g = super::load_or_build_dep_graph(&workspace_root)?;
 
     // detect() returns Cycle structs; filter out singletons (len == 1 without
     // self-edge is already handled inside scc::detect with min_size = 2).
     let cycles = crate::deps::scc::detect(&g, 2);
-    let cycle_groups: Vec<Vec<PathBuf>> =
-        cycles.into_iter().map(|c| c.members).collect();
+    let cycle_groups: Vec<Vec<PathBuf>> = cycles.into_iter().map(|c| c.members).collect();
 
     if json {
         let entries: Vec<_> = cycle_groups

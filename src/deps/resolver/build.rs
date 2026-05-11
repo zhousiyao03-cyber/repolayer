@@ -146,7 +146,10 @@ pub fn build_suffix_index(root: &Path) -> SuffixIndex {
                         .map(|c| c.as_os_str().to_string_lossy().into_owned())
                         .collect::<Vec<_>>()
                         .join("/");
-                    idx.by_suffix.entry(key.clone()).or_default().push(path.to_path_buf());
+                    idx.by_suffix
+                        .entry(key.clone())
+                        .or_default()
+                        .push(path.to_path_buf());
                     // Also index just the package name (last segment).
                     if let Some(last) = key.rsplit('/').next() {
                         idx.by_suffix
@@ -162,7 +165,10 @@ pub fn build_suffix_index(root: &Path) -> SuffixIndex {
         if let Some(pkg) = package {
             for ty in &top_level_types {
                 let fqn = format!("{}.{}", pkg, ty).replace('.', "/");
-                idx.by_suffix.entry(fqn).or_default().push(path.to_path_buf());
+                idx.by_suffix
+                    .entry(fqn)
+                    .or_default()
+                    .push(path.to_path_buf());
                 // Also index just the type (commonly seen at top-level).
                 idx.by_suffix
                     .entry(ty.clone())
@@ -240,10 +246,7 @@ fn extract_package_and_types(path: &Path, lang: Lang) -> Option<(Option<String>,
                         .strip_prefix("namespace ")
                         .or_else(|| line.strip_prefix("internal namespace "))
                     {
-                        let p = rest
-                            .trim_end_matches(';')
-                            .trim_end_matches('{')
-                            .trim();
+                        let p = rest.trim_end_matches(';').trim_end_matches('{').trim();
                         if !p.is_empty() {
                             package = Some(p.to_string());
                         }
@@ -283,7 +286,12 @@ fn extract_package_and_types(path: &Path, lang: Lang) -> Option<(Option<String>,
                 if let Some(name) = pick_after(
                     line,
                     &[
-                        "class ", "object ", "trait ", "enum ", "case class ", "case object ",
+                        "class ",
+                        "object ",
+                        "trait ",
+                        "enum ",
+                        "case class ",
+                        "case object ",
                     ],
                 ) {
                     types.push(name);
@@ -293,7 +301,12 @@ fn extract_package_and_types(path: &Path, lang: Lang) -> Option<(Option<String>,
                 if let Some(name) = pick_after(
                     line,
                     &[
-                        "class ", "struct ", "interface ", "record ", "enum ", "delegate ",
+                        "class ",
+                        "struct ",
+                        "interface ",
+                        "record ",
+                        "enum ",
+                        "delegate ",
                     ],
                 ) {
                     types.push(name);

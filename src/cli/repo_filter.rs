@@ -81,10 +81,12 @@ fn edit_distance(a: &str, b: &str) -> usize {
     for i in 1..=n {
         curr[0] = i;
         for j in 1..=m {
-            let cost = if a_bytes[i - 1] == b_bytes[j - 1] { 0 } else { 1 };
-            curr[j] = (prev[j] + 1)
-                .min(curr[j - 1] + 1)
-                .min(prev[j - 1] + cost);
+            let cost = if a_bytes[i - 1] == b_bytes[j - 1] {
+                0
+            } else {
+                1
+            };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -124,7 +126,10 @@ mod tests {
         // The substring match should appear before any distant-edit fallback.
         let prom_idx = msg.find("promotion_member");
         let unrel_idx = msg.find("totally_unrelated");
-        assert!(prom_idx.is_some(), "promotion_member should be suggested: {msg}");
+        assert!(
+            prom_idx.is_some(),
+            "promotion_member should be suggested: {msg}"
+        );
         if let (Some(p), Some(u)) = (prom_idx, unrel_idx) {
             assert!(p < u, "substring match should rank first: {msg}");
         }

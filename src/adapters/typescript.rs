@@ -66,7 +66,9 @@ fn _node_to_decl<'a, D: Doc>(
                 inner.clone()
             };
             if _is_handled_top_level(effective.kind().as_ref()) {
-                if let Some(mut decl) = _node_to_decl(&effective, src, _inside_class, _inside_interface) {
+                if let Some(mut decl) =
+                    _node_to_decl(&effective, src, _inside_class, _inside_interface)
+                {
                     decl.start_byte = node.range().start;
                     decl.start_line = node.start_pos().line() + 1;
                     let ds_byte = _leading_doc_start_byte(node).unwrap_or(node.range().start);

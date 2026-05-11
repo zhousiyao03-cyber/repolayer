@@ -44,9 +44,7 @@ pub fn resolve_workspace() -> Result<PathBuf> {
 /// Convenience: resolve workspace and join `.repolayer/<store>` in one shot.
 /// Used by query, search, find-related, view — every read-only command.
 pub fn store_path(store_filename: &str) -> Result<PathBuf> {
-    Ok(resolve_workspace()?
-        .join(".repolayer")
-        .join(store_filename))
+    Ok(resolve_workspace()?.join(".repolayer").join(store_filename))
 }
 
 #[cfg(test)]
@@ -81,7 +79,10 @@ mod tests {
         unsafe {
             std::env::remove_var(ENV_VAR);
         }
-        assert_eq!(ws.canonicalize().unwrap(), tmp.path().canonicalize().unwrap());
+        assert_eq!(
+            ws.canonicalize().unwrap(),
+            tmp.path().canonicalize().unwrap()
+        );
     }
 
     #[test]
@@ -96,7 +97,10 @@ mod tests {
         }
         assert!(res.is_err(), "should error when env points nowhere");
         let msg = res.unwrap_err().to_string();
-        assert!(msg.contains("REPOLAYER_INDEX"), "msg should name the env var: {msg}");
+        assert!(
+            msg.contains("REPOLAYER_INDEX"),
+            "msg should name the env var: {msg}"
+        );
     }
 
     #[test]

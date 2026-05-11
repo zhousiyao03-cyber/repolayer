@@ -94,7 +94,10 @@ pub fn parse_cargo_toml(path: &Path) -> Option<CargoManifest> {
             section = format!("[{}]", hdr);
             if hdr == "[bin]" {
                 section = "[[bin]]".to_string();
-                current_bin = Some(BinTarget { name: None, path: None });
+                current_bin = Some(BinTarget {
+                    name: None,
+                    path: None,
+                });
             }
             continue;
         }
@@ -169,9 +172,18 @@ pub fn parse_package_json(path: &Path) -> Option<PackageJson> {
     let v: Value = serde_json::from_str(&raw).ok()?;
     let manifest_dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
 
-    let name = v.get("name").and_then(|x| x.as_str()).map(|s| s.to_string());
-    let main = v.get("main").and_then(|x| x.as_str()).map(|s| s.to_string());
-    let module = v.get("module").and_then(|x| x.as_str()).map(|s| s.to_string());
+    let name = v
+        .get("name")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    let main = v
+        .get("main")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
+    let module = v
+        .get("module")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string());
     let types = v
         .get("types")
         .or_else(|| v.get("typings"))
@@ -208,7 +220,12 @@ pub fn resolve_package_entry(pkg: &PackageJson) -> Option<PathBuf> {
             }
         }
     }
-    if let Some(rel) = pkg.types.as_deref().or(pkg.module.as_deref()).or(pkg.main.as_deref()) {
+    if let Some(rel) = pkg
+        .types
+        .as_deref()
+        .or(pkg.module.as_deref())
+        .or(pkg.main.as_deref())
+    {
         if let Some(p) = _exists_with_source_pref(&pkg.manifest_dir.join(rel)) {
             return Some(p);
         }

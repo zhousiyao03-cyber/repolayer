@@ -14,7 +14,11 @@ fn parse_ts(src: &str) -> repolayer::core::declaration::ParseResult {
 fn parses_exported_class_with_methods() {
     let src = "export class User {\n  constructor() {}\n  greet(): string { return 'hi'; }\n}\n";
     let r = parse_ts(src);
-    let user = r.declarations.iter().find(|d| d.name == "User").expect("User class");
+    let user = r
+        .declarations
+        .iter()
+        .find(|d| d.name == "User")
+        .expect("User class");
     assert!(matches!(user.kind, DeclarationKind::Class));
     let method_names: Vec<_> = user.children.iter().map(|c| c.name.clone()).collect();
     assert!(method_names.contains(&"constructor".to_string()));

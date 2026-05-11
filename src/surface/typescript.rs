@@ -31,7 +31,10 @@ pub fn resolve(
     opts: &SurfaceOptions,
 ) -> Result<Vec<SurfaceEntry>, SurfaceError> {
     let (root_file, pkg_name) = match entry {
-        EntryPoint::TsPackage { root_file, pkg_name } => (root_file.clone(), pkg_name.clone()),
+        EntryPoint::TsPackage {
+            root_file,
+            pkg_name,
+        } => (root_file.clone(), pkg_name.clone()),
         _ => {
             return Err(SurfaceError::NoEntryPoint {
                 path: PathBuf::from("."),
@@ -63,13 +66,7 @@ struct FileSnapshot {
 }
 
 impl Walker {
-    fn walk_file(
-        &mut self,
-        file: &Path,
-        prefix: &[String],
-        depth: usize,
-        chain: Vec<ReExportHop>,
-    ) {
+    fn walk_file(&mut self, file: &Path, prefix: &[String], depth: usize, chain: Vec<ReExportHop>) {
         if depth > self.max_depth {
             return;
         }
@@ -212,7 +209,15 @@ impl Walker {
                 continue;
             }
             // Re-exported by target?
-            self._chase_indirect(target, prefix, &b.name, &exposed, &exports, depth, chain.clone());
+            self._chase_indirect(
+                target,
+                prefix,
+                &b.name,
+                &exposed,
+                &exports,
+                depth,
+                chain.clone(),
+            );
         }
     }
 
@@ -260,7 +265,11 @@ impl Walker {
                         }
                     }
                 }
-                TsExportItem::StarFrom { from, line, statement } => {
+                TsExportItem::StarFrom {
+                    from,
+                    line,
+                    statement,
+                } => {
                     if let Some(target) = _resolve_module(from_file, from) {
                         let hop = ReExportHop {
                             file: from_file.to_path_buf(),
@@ -273,7 +282,14 @@ impl Walker {
                         if let Some(s) = snap {
                             if let Some(d) = s.decls.iter().find(|d| d.name == source_name).cloned()
                             {
-                                self._emit(prefix, exposed, &d, &target, _push(chain.clone(), hop), true);
+                                self._emit(
+                                    prefix,
+                                    exposed,
+                                    &d,
+                                    &target,
+                                    _push(chain.clone(), hop),
+                                    true,
+                                );
                                 return;
                             }
                             let exports2 = s.exports.clone();

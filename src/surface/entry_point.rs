@@ -74,7 +74,8 @@ fn discover_file(file: &Path) -> Result<EntryPoint, SurfaceError> {
     let ext = file.extension().and_then(|s| s.to_str()).unwrap_or("");
     if name == "lib.rs" || name == "main.rs" {
         let src_dir = file.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let crate_name = _crate_name_from_cargo(&src_dir).unwrap_or_else(|| _dir_basename(&src_dir));
+        let crate_name =
+            _crate_name_from_cargo(&src_dir).unwrap_or_else(|| _dir_basename(&src_dir));
         return Ok(EntryPoint::RustCrate {
             root_file: file.to_path_buf(),
             crate_name,
@@ -97,7 +98,10 @@ fn discover_file(file: &Path) -> Result<EntryPoint, SurfaceError> {
     if name == "package.json" {
         return discover_typescript(file.parent().unwrap_or(Path::new(".")));
     }
-    if matches!(ext, "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs") {
+    if matches!(
+        ext,
+        "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs"
+    ) {
         let dir = file.parent().unwrap_or(Path::new("."));
         let pkg_name = manifest::parse_package_json(&dir.join("package.json"))
             .and_then(|p| p.name)
@@ -177,7 +181,8 @@ fn discover_rust(root: &Path) -> Result<EntryPoint, SurfaceError> {
     } else {
         return Err(SurfaceError::NoEntryPoint {
             path: root.to_path_buf(),
-            hint: "no Cargo.toml here; pass `--lang fallback` or point at lib.rs/main.rs directly".into(),
+            hint: "no Cargo.toml here; pass `--lang fallback` or point at lib.rs/main.rs directly"
+                .into(),
         });
     };
 
@@ -334,7 +339,8 @@ fn _find_nearest_manifest(dir: &Path) -> Option<PathBuf> {
         if !p.is_dir() {
             continue;
         }
-        if p.join("Cargo.toml").is_file() || p.join("pyproject.toml").is_file()
+        if p.join("Cargo.toml").is_file()
+            || p.join("pyproject.toml").is_file()
             || p.join("__init__.py").is_file()
         {
             return Some(p);

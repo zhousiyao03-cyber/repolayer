@@ -12,8 +12,12 @@ fn parse_scala(src: &str) -> repolayer::core::declaration::ParseResult {
 
 fn find_named<'a>(decls: &'a [Declaration], name: &str) -> Option<&'a Declaration> {
     for d in decls {
-        if d.name == name { return Some(d); }
-        if let Some(x) = find_named(&d.children, name) { return Some(x); }
+        if d.name == name {
+            return Some(d);
+        }
+        if let Some(x) = find_named(&d.children, name) {
+            return Some(x);
+        }
     }
     None
 }
@@ -24,7 +28,11 @@ fn parses_class() {
     let u = find_named(&r.declarations, "User").expect("User");
     assert!(matches!(u.kind, DeclarationKind::Class));
     let methods: Vec<_> = u.children.iter().map(|c| c.name.clone()).collect();
-    assert!(methods.contains(&"name".to_string()), "User children: {:?}", methods);
+    assert!(
+        methods.contains(&"name".to_string()),
+        "User children: {:?}",
+        methods
+    );
 }
 
 #[test]

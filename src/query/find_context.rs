@@ -82,8 +82,7 @@ pub fn find_context(
             items: vec![],
             total_tokens: 0,
             suggestion:
-                "No usable query tokens (task description was too short or non-alphanumeric)"
-                    .into(),
+                "No usable query tokens (task description was too short or non-alphanumeric)".into(),
         });
     }
 
@@ -100,8 +99,7 @@ pub fn find_context(
         }
     }
     let mut substring_ranked: Vec<(f32, Node)> = substring_pool.into_values().collect();
-    substring_ranked
-        .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    substring_ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
     // ── Lane 2: hybrid search (BM25 + optional dense embedding) ─────────────
     // Each search hit is a chunk (file + line range); we lift it to whichever
@@ -130,8 +128,7 @@ pub fn find_context(
     // between substring (0..~10) and search (RRF-of-RRF, ~0..0.03). For each
     // node id we collect 1/(k+rank) contributions from whichever lane(s) it
     // appears in, then sort.
-    let mut fused: std::collections::HashMap<String, FusedEntry> =
-        std::collections::HashMap::new();
+    let mut fused: std::collections::HashMap<String, FusedEntry> = std::collections::HashMap::new();
     for (rank, (_, node)) in substring_ranked.iter().enumerate() {
         let contrib = 1.0 / (RRF_K + rank as f32 + 1.0);
         fused
@@ -163,8 +160,11 @@ pub fn find_context(
             });
     }
     let mut candidates: Vec<FusedEntry> = fused.into_values().collect();
-    candidates
-        .sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    candidates.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // ── Materialize items under the token budget ────────────────────────────
     let mut items = Vec::new();

@@ -574,7 +574,11 @@ fn _walk_csharp<'a, D: Doc>(node: &Node<'a, D>, out: &mut Vec<RawImport>) {
         if kind == "using_directive" {
             let line = (c.start_pos().line() + 1) as u32;
             let stmt = c.text().into_owned();
-            let body = stmt.trim_start_matches("using").trim_end_matches(';').trim().to_string();
+            let body = stmt
+                .trim_start_matches("using")
+                .trim_end_matches(';')
+                .trim()
+                .to_string();
             let is_static = body.starts_with("static ");
             let rest = body.trim_start_matches("static ").trim().to_string();
 
@@ -607,7 +611,10 @@ fn _walk_csharp<'a, D: Doc>(node: &Node<'a, D>, out: &mut Vec<RawImport>) {
                 local_name: None,
                 raw_path: Some(dotted),
             });
-        } else if matches!(kind, "namespace_declaration" | "file_scoped_namespace_declaration") {
+        } else if matches!(
+            kind,
+            "namespace_declaration" | "file_scoped_namespace_declaration"
+        ) {
             // Recurse into namespace bodies; usings can live inside.
             _walk_csharp(&c, out);
         }

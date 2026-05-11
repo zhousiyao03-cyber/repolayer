@@ -213,9 +213,8 @@ fn build_client(timeout: Duration) -> io::Result<reqwest::blocking::Client> {
     // Add an extra CA bundle if the user pointed us at one. Useful behind corp
     // TLS-intercepting proxies whose root is exported as a PEM file.
     if let Ok(bundle) = std::env::var("AST_OUTLINE_CA_BUNDLE") {
-        let pem = fs::read(&bundle).map_err(|e| {
-            io::Error::other(format!("AST_OUTLINE_CA_BUNDLE={bundle}: {e}"))
-        })?;
+        let pem = fs::read(&bundle)
+            .map_err(|e| io::Error::other(format!("AST_OUTLINE_CA_BUNDLE={bundle}: {e}")))?;
         for cert in reqwest::Certificate::from_pem_bundle(&pem)
             .map_err(|e| io::Error::other(format!("invalid CA bundle: {e}")))?
         {
@@ -237,9 +236,7 @@ fn build_client(timeout: Duration) -> io::Result<reqwest::blocking::Client> {
         builder = builder.danger_accept_invalid_certs(true);
     }
 
-    builder
-        .build()
-        .map_err(io::Error::other)
+    builder.build().map_err(io::Error::other)
 }
 
 /// Print the one-time TLS-policy notice. Called from `ensure_model` so it only
@@ -286,9 +283,7 @@ fn download_to(client: &reqwest::blocking::Client, url: &str, dest: &Path) -> io
     let mut reader = resp;
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = reader
-            .read(&mut buf)
-            .map_err(io::Error::other)?;
+        let n = reader.read(&mut buf).map_err(io::Error::other)?;
         if n == 0 {
             break;
         }
@@ -316,8 +311,7 @@ fn manifest_path(dir: &Path) -> PathBuf {
 }
 
 fn write_manifest(dir: &Path, manifest: &Manifest) -> io::Result<()> {
-    let json = serde_json::to_vec_pretty(manifest)
-        .map_err(io::Error::other)?;
+    let json = serde_json::to_vec_pretty(manifest).map_err(io::Error::other)?;
     fs::write(manifest_path(dir), json)
 }
 
@@ -354,9 +348,7 @@ fn cache_is_valid(dir: &Path, info: &ModelInfo) -> io::Result<bool> {
         };
         let actual = sha256_file(&path)?;
         if &actual != expected {
-            eprintln!(
-                "ast-outline: cached {file} failed integrity check, will re-download"
-            );
+            eprintln!("ast-outline: cached {file} failed integrity check, will re-download");
             return Ok(false);
         }
     }

@@ -495,7 +495,10 @@ fn _consume_export<'a, D: Doc>(node: &Node<'a, D>, src: &str, out: &mut Vec<TsEx
     for c in node.children() {
         if c.kind() == "string" {
             let raw = c.text().into_owned();
-            from_module = Some(raw.trim_matches(|ch: char| ch == '\'' || ch == '"').to_string());
+            from_module = Some(
+                raw.trim_matches(|ch: char| ch == '\'' || ch == '"')
+                    .to_string(),
+            );
             break;
         }
     }
@@ -618,8 +621,12 @@ fn _consume_export<'a, D: Doc>(node: &Node<'a, D>, src: &str, out: &mut Vec<TsEx
         };
         let kind = c.kind();
         match kind.as_ref() {
-            "class_declaration" | "abstract_class_declaration" | "interface_declaration"
-            | "enum_declaration" | "type_alias_declaration" | "function_declaration"
+            "class_declaration"
+            | "abstract_class_declaration"
+            | "interface_declaration"
+            | "enum_declaration"
+            | "type_alias_declaration"
+            | "function_declaration"
             | "function_signature" => {
                 if let Some(n) = c.field("name") {
                     out.push(TsExportItem::Local {
@@ -857,4 +864,3 @@ fn _parse_dunder_all<'a, D: Doc>(assignment: &Node<'a, D>) -> Option<Vec<String>
     }
     Some(out)
 }
-

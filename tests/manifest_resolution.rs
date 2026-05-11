@@ -50,8 +50,16 @@ edition = "2021"
     )
     .unwrap();
     let aliases = detect_aliases(d.path());
-    let names: Vec<_> = aliases.rust_packages.iter().map(|p| p.name.clone()).collect();
-    assert!(names.contains(&"myapp-core".to_string()), "got: {:?}", names);
+    let names: Vec<_> = aliases
+        .rust_packages
+        .iter()
+        .map(|p| p.name.clone())
+        .collect();
+    assert!(
+        names.contains(&"myapp-core".to_string()),
+        "got: {:?}",
+        names
+    );
     assert!(names.contains(&"myapp-cli".to_string()), "got: {:?}", names);
 }
 

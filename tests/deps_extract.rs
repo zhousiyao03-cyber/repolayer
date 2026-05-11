@@ -11,7 +11,10 @@ fn write_file(suffix: &str, content: &str) -> NamedTempFile {
 
 #[test]
 fn extracts_typescript_imports() {
-    let f = write_file(".ts", "import { Foo } from './foo';\nimport bar from 'lib';\n");
+    let f = write_file(
+        ".ts",
+        "import { Foo } from './foo';\nimport bar from 'lib';\n",
+    );
     let imports = extract(f.path(), Lang::TypeScript);
     assert!(
         imports.len() >= 2,
@@ -39,7 +42,9 @@ fn extracts_python_imports() {
     assert!(imports.len() >= 2, "got {} imports", imports.len());
     let specs: Vec<_> = imports.iter().map(|i| i.spec.clone()).collect();
     assert!(
-        specs.iter().any(|s| s.contains("core") || s.contains(".core")),
+        specs
+            .iter()
+            .any(|s| s.contains("core") || s.contains(".core")),
         "specs: {:?}",
         specs
     );

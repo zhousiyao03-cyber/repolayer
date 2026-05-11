@@ -12,8 +12,13 @@ fn parse_go(src: &str) -> repolayer::core::declaration::ParseResult {
 
 // Go adapter wraps everything under a package Namespace declaration.
 // Helper to get children of the package namespace.
-fn package_children(r: &repolayer::core::declaration::ParseResult) -> &Vec<repolayer::core::declaration::Declaration> {
-    let ns = r.declarations.iter().find(|d| matches!(d.kind, DeclarationKind::Namespace))
+fn package_children(
+    r: &repolayer::core::declaration::ParseResult,
+) -> &Vec<repolayer::core::declaration::Declaration> {
+    let ns = r
+        .declarations
+        .iter()
+        .find(|d| matches!(d.kind, DeclarationKind::Namespace))
         .expect("package namespace");
     &ns.children
 }
@@ -31,8 +36,15 @@ fn parses_struct_with_methods() {
     let src = "package main\n\ntype User struct { ID int }\n\nfunc (u *User) Name() string { return \"\" }\n";
     let r = parse_go(src);
     let children = package_children(&r);
-    let user = children.iter().find(|d| d.name == "User").expect("User struct");
+    let user = children
+        .iter()
+        .find(|d| d.name == "User")
+        .expect("User struct");
     assert!(matches!(user.kind, DeclarationKind::Struct));
     let method_names: Vec<_> = user.children.iter().map(|c| c.name.clone()).collect();
-    assert!(method_names.contains(&"Name".to_string()), "User children: {:?}", method_names);
+    assert!(
+        method_names.contains(&"Name".to_string()),
+        "User children: {:?}",
+        method_names
+    );
 }

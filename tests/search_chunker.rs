@@ -1,5 +1,5 @@
-use repolayer::search::chunker::{self, ChunkerKind};
 use ast_grep_language::SupportLang;
+use repolayer::search::chunker::{self, ChunkerKind};
 use std::io::Write;
 use std::path::PathBuf;
 
@@ -8,10 +8,8 @@ use std::path::PathBuf;
 #[test]
 fn chunks_a_simple_typescript_file() {
     let mut f = tempfile::Builder::new().suffix(".ts").tempfile().unwrap();
-    f.write_all(
-        b"export function foo() { return 1; }\nexport function bar() { return 2; }\n",
-    )
-    .unwrap();
+    f.write_all(b"export function foo() { return 1; }\nexport function bar() { return 2; }\n")
+        .unwrap();
     let chunks = chunker::chunk_file(f.path(), "src/hello.ts");
     assert!(!chunks.is_empty(), "expected at least one chunk");
     assert_eq!(chunks[0].language, "typescript");
@@ -23,10 +21,16 @@ fn chunks_a_simple_typescript_file() {
 
 #[test]
 fn chunk_file_returns_empty_for_unsupported_extension() {
-    let mut f = tempfile::Builder::new().suffix(".unknown_ext_xyz").tempfile().unwrap();
+    let mut f = tempfile::Builder::new()
+        .suffix(".unknown_ext_xyz")
+        .tempfile()
+        .unwrap();
     f.write_all(b"hello world").unwrap();
     let chunks = chunker::chunk_file(f.path(), "x.unknown_ext_xyz");
-    assert!(chunks.is_empty(), "unsupported extension should yield no chunks");
+    assert!(
+        chunks.is_empty(),
+        "unsupported extension should yield no chunks"
+    );
 }
 
 #[test]
@@ -81,14 +85,18 @@ fn chunks_cover_full_source_without_gaps() {
     let src = "// header\nfn a() {}\n\nfn b() {}\n// trailer\n";
     let chunks = chunker::chunk_source(src, "f.rs", ChunkerKind::AstGrep(SupportLang::Rust));
     let joined: String = chunks.iter().map(|c| c.content.as_str()).collect();
-    assert_eq!(joined, src, "chunks must reconstruct the original source exactly");
+    assert_eq!(
+        joined, src,
+        "chunks must reconstruct the original source exactly"
+    );
 }
 
 #[test]
 fn empty_source_yields_no_chunks() {
     let chunks = chunker::chunk_source("", "f.rs", ChunkerKind::AstGrep(SupportLang::Rust));
     assert!(chunks.is_empty());
-    let chunks2 = chunker::chunk_source("   \n\t\n", "f.rs", ChunkerKind::AstGrep(SupportLang::Rust));
+    let chunks2 =
+        chunker::chunk_source("   \n\t\n", "f.rs", ChunkerKind::AstGrep(SupportLang::Rust));
     assert!(chunks2.is_empty());
 }
 

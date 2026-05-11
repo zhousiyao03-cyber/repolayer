@@ -21,9 +21,14 @@ fn parses_top_level_function() {
 
 #[test]
 fn parses_class_with_method() {
-    let src = "class User:\n    def __init__(self):\n        pass\n    def name(self):\n        pass\n";
+    let src =
+        "class User:\n    def __init__(self):\n        pass\n    def name(self):\n        pass\n";
     let r = parse(src);
-    let user = r.declarations.iter().find(|d| d.name == "User").expect("User class");
+    let user = r
+        .declarations
+        .iter()
+        .find(|d| d.name == "User")
+        .expect("User class");
     assert!(matches!(user.kind, DeclarationKind::Class));
     let method_names: Vec<_> = user.children.iter().map(|c| c.name.clone()).collect();
     assert!(method_names.contains(&"__init__".to_string()));

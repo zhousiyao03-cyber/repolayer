@@ -28,7 +28,11 @@ fn parses_class_with_method() {
     let user = find_named(&r.declarations, "User").expect("User");
     assert!(matches!(user.kind, DeclarationKind::Class));
     let methods: Vec<_> = user.children.iter().map(|c| c.name.clone()).collect();
-    assert!(methods.contains(&"name".to_string()), "User children: {:?}", methods);
+    assert!(
+        methods.contains(&"name".to_string()),
+        "User children: {:?}",
+        methods
+    );
 }
 
 #[test]

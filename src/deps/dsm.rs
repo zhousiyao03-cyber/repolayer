@@ -70,7 +70,10 @@ fn compute_levels(graph: &DepGraph) -> HashMap<PathBuf, u32> {
         out_count.insert(src.clone(), edges.len());
         for e in edges {
             all.insert(e.target.clone());
-            rev_adj.entry(e.target.clone()).or_default().push(src.clone());
+            rev_adj
+                .entry(e.target.clone())
+                .or_default()
+                .push(src.clone());
         }
     }
     for f in &all {

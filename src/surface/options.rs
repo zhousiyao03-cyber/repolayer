@@ -59,9 +59,18 @@ impl Default for SurfaceOptions {
 
 #[derive(Debug)]
 pub enum SurfaceError {
-    NoEntryPoint { path: PathBuf, hint: String },
-    Io { path: PathBuf, source: std::io::Error },
-    Parse { path: PathBuf, message: String },
+    NoEntryPoint {
+        path: PathBuf,
+        hint: String,
+    },
+    Io {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    Parse {
+        path: PathBuf,
+        message: String,
+    },
     #[allow(dead_code)]
     BadOverride(String),
 }

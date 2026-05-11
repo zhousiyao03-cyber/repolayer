@@ -1,20 +1,36 @@
 # repolayer
 
-> 跨仓代码索引 CLI，给 AI agent 提供「比 grep 信噪比高、比 LSP 更跨仓、比 Read 全文省 token」的代码导航能力。
+> A cross-repo code-index CLI for AI agents. Higher signal-to-noise than
+> grep, more cross-repo than LSP, and far cheaper in tokens than reading
+> whole files.
 >
-> Built on top of [aeroxy/ast-outline](https://github.com/aeroxy/ast-outline) — extends with multi-repo workspace, IDL (protobuf/thrift) as first-class graph nodes, and cross-repo Implements/Invokes/Imports edges.
+> Built on top of [aeroxy/ast-outline](https://github.com/aeroxy/ast-outline) —
+> extended with multi-repo workspaces, IDL (protobuf / thrift) as
+> first-class graph nodes, and cross-repo Implements / Invokes / Imports
+> / Calls edges.
 
 ## Status: v0.2.0-alpha
 
-- 4 SQLite stores under `.repolayer/`：`index.db`（graph）/ `outline.db`（per-file Declaration trees）/ `deps.db`（file-level dependency graph）/ `search.db`（BM25 + dense embedding chunks via [`sqlite-vec`](https://github.com/asg017/sqlite-vec)）
-- 10 source-language adapters via `ast-grep-core`：Rust / C# / Python / TypeScript / JavaScript / Java / Kotlin / Scala / Go / Markdown
-- 2 IDL parsers (bare tree-sitter)：protobuf / thrift
-- Single static binary (~47 MB release)
+- **18 CLI subcommands** covering symbol lookup, who-calls-this,
+  IDL method → server / client tracing, hybrid BM25 + semantic search,
+  outline / function-body extraction, and the dependency graph.
+- **4 SQLite stores under `.repolayer/`** — `index.db` (graph), `outline.db`
+  (per-file declaration trees), `deps.db` (file-level dependency graph),
+  `search.db` (BM25 + dense embedding chunks via
+  [sqlite-vec](https://github.com/asg017/sqlite-vec)).
+- **10 source-language adapters** via `ast-grep-core`: Rust, C#, Python,
+  TypeScript, JavaScript, Java, Kotlin, Scala, Go, Markdown.
+- **2 IDL parsers** (bare tree-sitter): protobuf, thrift.
+- Single static binary (~47 MB release build).
 
 ## When to use repolayer vs ast-outline
 
-- **Single repo, just want outline / show / search** → use [ast-outline](https://github.com/aeroxy/ast-outline) directly. No index to maintain.
-- **Multi-repo workspace, microservice with IDL contracts, agent that needs cross-repo navigation** → repolayer is the natural extension.
+- **Single repo, you just want outline / show / search** → use
+  [ast-outline](https://github.com/aeroxy/ast-outline) directly. No
+  index to maintain.
+- **Multi-repo workspace, microservice with IDL contracts, an agent
+  that needs cross-repo navigation** → repolayer is the natural
+  extension.
 
 ## Install
 
@@ -37,10 +53,10 @@ repolayer update             # incremental re-index of git-changed files
 
 ## Connecting AI agents (Claude Code skill)
 
-repolayer ships as a **Claude Code skill**, not an MCP server. The agent calls
-the CLI directly via Bash; the skill description teaches it which subcommand
-to reach for. (Compatible with Cursor / Codex out of the box — they all have
-shell access.)
+repolayer ships as a **Claude Code skill**, not an MCP server. The
+agent calls the CLI directly via Bash; the skill description teaches it
+which subcommand to reach for. It works out of the box with Cursor /
+Codex / any agent that has shell access.
 
 ```bash
 repolayer install --skill claude-code
@@ -48,9 +64,9 @@ repolayer install --skill claude-code
 # Restart Claude Code, then ask normal cross-repo questions.
 ```
 
-The skill ([`skills/repolayer.md`](skills/repolayer.md)) ships with a decision
-tree mapping common tasks to subcommand sequences (e.g. "trace an API
-end-to-end" → `query → outline → show`).
+The skill ([`skills/repolayer.md`](skills/repolayer.md)) ships with a
+decision table mapping common tasks to subcommand sequences (e.g.
+"trace an API end-to-end" → `query → find-idl-impl → show`).
 
 ### Decoupling cwd from index location
 
@@ -61,9 +77,11 @@ cross-repo index from a separate workspace, set:
 export REPOLAYER_INDEX=$HOME/my_workspace
 ```
 
-Read-only commands (`query` / `search` / `find-related` / `view`) honor the env
-var; write commands (`build` / `update` / `init`) deliberately stay cwd-bound
-to avoid surprise writes.
+Read-only commands that touch *only* the index (`query`, `search`,
+`callers`, `find-idl-impl`, `find-related`, `view`) honour the env
+var; commands that also read source files keep using cwd to resolve
+relative paths. Write commands (`build`, `update`, `init`) deliberately
+stay cwd-bound to avoid surprise writes.
 
 ## CLI subcommands
 
@@ -73,12 +91,14 @@ repolayer init                            # create repolayer.yml
 repolayer build                           # full index from scratch
 repolayer update                          # incremental (via git diff)
 
-# Cross-repo lookup (read-only; honors $REPOLAYER_INDEX)
+# Cross-repo graph lookup (index-only; honours $REPOLAYER_INDEX)
 repolayer query "<text>" [--repo NAME]    # exact symbol / IDL method / path substring
-repolayer search "<query>" [--repo NAME]  # hybrid BM25 + dense semantic; URL/string-friendly
+repolayer callers <symbol> [--depth N]    # who calls X (inbound Calls edges)
+repolayer find-idl-impl <method>          # IDL method → impls (server) + invokers (client)
+repolayer search "<query>" [--repo NAME]  # hybrid BM25 + dense semantic
 repolayer find-related <file>:<line>      # similar code chunks
 
-# Per-file structure (no index needed; pure ast-grep)
+# Per-file structure (reads source; cwd-bound)
 repolayer outline <paths>                 # signatures + line ranges, no bodies
 repolayer show <file> <Symbol>            # source body by AST boundaries
 repolayer digest <paths>                  # one-page public API map
@@ -100,8 +120,10 @@ repolayer view --out <dir>                # static HTML viewer of the index
 
 | Flag | Where | Effect |
 |---|---|---|
-| `--repo <name>` | `query` / `search` | Restrict to one repo from `repolayer.yml`. Typo → "Did you mean ..." |
-| `--full-content` | `search --json` | Include chunk body (default omits to save tokens; only path:lines + 200-char preview) |
+| `--repo <name>` | `query` / `search` / `callers` | Restrict to one repo from `repolayer.yml`. Typo → "Did you mean ..." |
+| `--depth N` | `callers` / `deps` | BFS hops (default 1) |
+| `--service <name>` | `find-idl-impl` | Disambiguate when multiple IDL services declare the same method |
+| `--full-content` | `search --json` | Include chunk bodies (default omits to save tokens; only `path:lines` + 200-char preview) |
 | `--json` / `-k` | every read command | Standard output / hit count |
 
 ## Configuration (`repolayer.yml`)
@@ -110,7 +132,7 @@ repolayer view --out <dir>                # static HTML viewer of the index
 repos:
   - { name: my_backend, path: ./services/backend }
   - { name: my_frontend, path: ../frontend_monorepo }
-  - { name: my_idl, path: ../idl_repo, type: idl }   # protobuf/thrift definitions
+  - { name: my_idl, path: ../idl_repo, type: idl }   # protobuf / thrift definitions
 
 # Optional: declare cross-repo dependencies that imports don't expose
 links:
@@ -129,32 +151,60 @@ llm:
 ## Architecture
 
 ```
-┌────────────────────────────────────────────────────────────────────┐
-│  16 CLI subcommands                                                 │
-├────────────────────────────────────────────────────────────────────┤
-│  Query layer (read-only, honors $REPOLAYER_INDEX)                   │
-│   query / search / find-related / view                              │
-│   outline / show / digest / surface / deps / reverse-deps / cycles  │
-├────────────────────────────────────────────────────────────────────┤
+┌─────────────────────────────────────────────────────────────────────┐
+│  18 CLI subcommands                                                 │
+├─────────────────────────────────────────────────────────────────────┤
+│  Query layer (read-only)                                            │
+│    index-only (honours $REPOLAYER_INDEX):                           │
+│       query / callers / find-idl-impl / search / find-related /     │
+│       view                                                          │
+│    source-reading (cwd-bound):                                      │
+│       outline / show / digest / surface / deps / reverse-deps /     │
+│       cycles                                                        │
+├─────────────────────────────────────────────────────────────────────┤
 │  Storage (4 independent SQLite stores in .repolayer/)               │
-│   index.db    main graph: nodes (Repo/Module/Type/Method/Function/  │
-│               IdlService/IdlMethod) + edges (Contains/Imports/      │
-│               Calls/Implements/Invokes/Defines/Extends),            │
-│               edges.confidence ∈ [0, 1] for heuristic vs ast-grounded│
-│   outline.db  per-file Declaration trees (JSON, indexed by path)    │
-│   deps.db     file-level forward + reverse import edges             │
-│   search.db   chunks + 256-d embeddings (vec0 virtual table)        │
-├────────────────────────────────────────────────────────────────────┤
+│    index.db    main graph:                                          │
+│                  nodes ∈ Repo / Module / Type / Method / Function / │
+│                          IdlService / IdlMethod                     │
+│                  edges ∈ Contains / Imports / Calls / Implements /  │
+│                          Invokes / Defines / Extends                │
+│                  edges.confidence ∈ [0, 1] (1.0 = AST-derived;      │
+│                          < 1.0 = heuristic)                         │
+│    outline.db  per-file Declaration trees (JSON, indexed by path)   │
+│    deps.db     file-level forward + reverse import edges            │
+│    search.db   chunks + 256-d embeddings (vec0 virtual table)       │
+├─────────────────────────────────────────────────────────────────────┤
 │  Parser layer                                                       │
-│   adapters/      10 source-language adapters (ast-grep-core)        │
-│   adapters/idl/  protobuf + thrift (bare tree-sitter)               │
-├────────────────────────────────────────────────────────────────────┤
-│  Cross-repo gluing                                                   │
-│   linker/imports     PackageIndex → cross-repo Imports edges (1.0)  │
-│   linker/idl_links   IDL method → impl/invokes (0.7 ast / 0.4 path) │
-│   linker/manual      yml-declared explicit links                    │
-└────────────────────────────────────────────────────────────────────┘
+│    adapters/      10 source-language adapters (ast-grep-core)       │
+│    adapters/idl/  protobuf + thrift (bare tree-sitter)              │
+├─────────────────────────────────────────────────────────────────────┤
+│  Cross-repo gluing (linker/)                                        │
+│    imports        PackageIndex → cross-repo Imports edges  (1.0)    │
+│    calls          ast-grep call expressions → Calls edges  (1.0,    │
+│                     name-unique resolution only)                    │
+│    idl_links      IDL method → Implements / Invokes        (0.7 AST │
+│                     call match, 0.4 path heuristic)                 │
+│    manual         yml-declared explicit links                       │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
+### Call-graph extraction
+
+`linker/calls` walks every source file via ast-grep and emits a Calls
+edge from the caller's file (`Module` node) to the callee `Function` /
+`Method` node when the callee name resolves to **exactly one** node
+across the indexed workspace. This keeps confidence at 1.0 by
+construction — ambiguous names (`init`, `Get`, `parse`, lowercase short
+words) are skipped to avoid drowning real signal in noise.
+
+Caller granularity is the file, not the enclosing function. The
+`callers` CLI prints `caller -> target` lines so multi-definition cases
+stay unambiguous; follow up with `repolayer outline <caller-path>` to
+pinpoint the call site inside the file.
+
+For function-level callers or for ambiguous names, declare the
+relationship explicitly in `repolayer.yml` under `links: [{kind:
+calls, ...}]`.
 
 ### Search retrieval pipeline
 
@@ -171,23 +221,28 @@ search "<query>"
 
 ### Chunking
 
-`search` indexes **declaration-aware chunks** (≤ 1500 chars, packed greedy,
-never splits a function in half). One file → average 3.5 chunks. See
-[`src/search/chunker.rs`](src/search/chunker.rs) for the algorithm.
+`search` indexes **declaration-aware chunks** (≤ 1500 chars, packed
+greedily, never splits a function in half). One file → ~3.5 chunks on
+average. See [`src/search/chunker.rs`](src/search/chunker.rs) for the
+algorithm.
 
 ## Roadmap
 
-- **v0.2.1**: cargo-dist cross-platform release binaries; per-file embedding-aware incremental update; module-level LLM summary backfill
-- **v0.3**: real call graph extraction (Calls edges between functions); HTTP transport for the skill (multi-machine workspaces)
+- **v0.2.1** — cargo-dist cross-platform release binaries; per-file
+  embedding-aware incremental update; module-level LLM summary backfill.
+- **v0.3** — function-level Calls edges (currently file-level); impact
+  analysis (`who uses this type / field`); HTTP transport for the skill
+  (multi-machine workspaces).
 
 ## Testing
 
 ```bash
-cargo test                                  # 290+ integration tests
+cargo test                                  # ~320 integration tests
 cargo test --test cli_query                 # one suite
 cargo clippy --all-targets -- -D warnings   # lint must be clean
 ```
 
 ## License
 
-MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE) for adopted ast-outline components.
+MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE) for adopted
+ast-outline components.

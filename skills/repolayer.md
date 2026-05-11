@@ -1,122 +1,156 @@
 ---
 name: repolayer
 description: |
-  跨仓代码索引 CLI。用户问"X 在哪定义""X 的全链路""谁调用了 X""谁实现了这个 IDL 方法"
-  "这个 service / RPC 对应哪段代码"等跨仓导航问题时，优先用它，比 grep / find / 整文件 Read
-  更快、token 更省，且能识别跨仓 Imports / Calls / Implements 边。也覆盖单仓的精确符号查询、
-  混合检索、outline / 函数体提取、依赖图查询。
-  环境变量 $REPOLAYER_INDEX 已指向集中索引目录（如 ~/repolayer_ttec/），
-  即使 cwd 下没有 .repolayer/ 也可直接调用。
+  Cross-repo code-index CLI. Reach for it first when the user asks
+  "where is X defined", "who calls X", "what implements this IDL method",
+  "what's the full chain behind this service / RPC", or anything else that
+  involves navigating multiple repos. It is faster and cheaper than
+  grep / find / reading whole files, and it knows about cross-repo
+  Imports / Calls / Implements edges. It also covers exact symbol lookup,
+  hybrid (BM25 + semantic) search, outline / function-body extraction,
+  and dependency-graph queries inside a single repo.
+
+  When `$REPOLAYER_INDEX` is set, read-only queries resolve against that
+  central workspace even when the current directory has no `.repolayer/`.
 ---
 
 # repolayer
 
-预构建的多仓代码索引 CLI。工作区根目录下的 `.repolayer/` 是索引产物（4 个 SQLite
-库：graph / outline / deps / search），由 `repolayer build` 全量生成、
-`repolayer update` 按 git diff 增量刷新。
+A pre-built multi-repo code index served via a CLI. The `.repolayer/`
+directory under the workspace root holds four SQLite stores (graph /
+outline / deps / search). `repolayer build` produces them from scratch;
+`repolayer update` does an incremental refresh based on `git diff`.
 
-二进制：`which repolayer`。
+Binary location: `which repolayer`.
 
-**索引位置**：默认从当前 cwd 找 `.repolayer/`。如果设了环境变量 `REPOLAYER_INDEX=<dir>`，
-查询类命令里**只读索引、不读源文件**的那几条（`query` / `search` / `find-related` / `view`）
-会改从该目录读索引——适合"在业务仓里编辑代码、但用集中式工作区做跨仓查询"的工作流。
-其余读源文件的命令（`outline` / `show` / `digest` / `surface` / `deps` / `reverse-deps` /
-`cycles`）仍然以 cwd 为锚解析相对路径，需要先 `cd` 到目标仓。
-写索引的命令（`build` / `update` / `init`）始终绑定 cwd，避免误写。
+**Index location.** Read-only commands look at the current working
+directory's `.repolayer/` first. If `REPOLAYER_INDEX=<dir>` is set, the
+queries that read *only* the index (`query` / `search` / `callers` /
+`find-idl-impl` / `find-related` / `view`) switch to that directory.
+This is for the "I'm editing in business repo A but want cross-repo
+answers from a shared workspace" workflow. Commands that also touch
+source files (`outline` / `show` / `digest` / `surface` / `deps` /
+`reverse-deps` / `cycles`) keep using cwd to resolve relative paths,
+so cd into the target repo first. Index-writing commands (`build` /
+`update` / `init`) always bind to cwd to avoid surprising writes.
 
-如果 `.repolayer/` 不存在或 `repolayer.yml` 没配置，所有查询命令会报
-"no index found" 并提示先 build（或设 `$REPOLAYER_INDEX`）。
+If `.repolayer/` is missing or `repolayer.yml` isn't set up, queries
+exit with "no index found" and a hint to run `repolayer build` (or set
+`$REPOLAYER_INDEX`).
 
-## 决策树（先读这个）
+## Decision table — read this first
 
-| 起点 | 用什么 |
+| Starting point | Command |
 |---|---|
-| 我知道符号名（精确 / 子串），含 IDL method / service | `repolayer query "Name"` |
-| 同上但只想在某个仓里找 | `repolayer query "Name" --repo <name>` |
-| 我知道关键词或行为描述（不知道符号名） | `repolayer search "..."` |
-| 同上但只在某个仓里找 | `repolayer search "..." --repo <name>` |
-| 找一段 URL / API path / 字面字符串（如 `/api/v1/...`） | `repolayer search "/api/v1/..."` 然后再缩小 |
-| 我有一个文件，想看它的结构 | `repolayer outline <file>` |
-| 我有一个文件 + 符号，想看函数体 | `repolayer show <file> <symbol>` |
-| 我想看一个目录 / 包对外暴露什么 | `repolayer digest <dir>` 或 `repolayer surface <dir>` |
-| 我想知道 X 文件 import 了什么 | `repolayer deps <file>` |
-| 我想知道谁 import 了 X 文件 | `repolayer reverse-deps <file>` |
-| 找跟 X:line 相似的代码块 | `repolayer find-related <file>:<line>` |
-| 工作区有 import 循环吗 | `repolayer cycles` |
+| You know the symbol name (exact or substring), incl. IDL methods | `repolayer query "Name"` |
+| Same, but restricted to one repo | `repolayer query "Name" --repo <name>` |
+| **Who calls a function** (works across repos for unique names) | `repolayer callers <symbol>` |
+| **Server / client of an IDL method** sorted by confidence | `repolayer find-idl-impl <Method>` |
+| Keyword or behaviour description, you don't know the symbol | `repolayer search "..."` |
+| Same, narrowed to one repo | `repolayer search "..." --repo <name>` |
+| URL / API path / literal string (e.g. `/api/v1/...`) | `repolayer search "/api/v1/..."`, then narrow |
+| Skim the structure of one file | `repolayer outline <file>` |
+| Pull one function body out of a file | `repolayer show <file> <symbol>` |
+| One-page public-API map of a directory or package | `repolayer digest <dir>` / `repolayer surface <dir>` |
+| What does X import | `repolayer deps <file>` |
+| Who imports X | `repolayer reverse-deps <file>` |
+| Code chunks similar to `<file>:<line>` | `repolayer find-related <file>:<line>` |
+| Are there import cycles | `repolayer cycles` |
 
-**⚠️ cwd 规则（v0.2 实际行为）**：
+**⚠️ cwd rules (v0.2 behaviour):**
 
-- 走 `$REPOLAYER_INDEX` 全局索引、**不挑 cwd** 的命令：`query` / `search`。
-  这两条只读 `index.db` / `search.db`，路径在索引里已是绝对/带 repo 前缀，
-  在任何目录下都能直接调用（包括 `~`、`/tmp`、`code/repolayer` 等）。
-- **必须 cwd 在目标仓里**的命令：`outline` / `show` / `digest` / `surface` /
-  `deps` / `reverse-deps` / `find-related` / `cycles`。这些要读源文件本身，
-  接受的是相对路径。在错误目录下会报 `path not found` 或 `no adapter for ...`。
-  正确做法：先从 `query` / `search` 结果里拿到绝对路径，再 `cd <repo-root>` 后调用。
-  注意 hook 会在每条 Bash 命令后把 cwd reset 回 session 起始目录，所以**每次都要拼**
-  `cd /Users/bytedance/<repo> && repolayer outline biz/handler/x.go`，不能依赖前一条 `cd`。
+- **Index-only commands, cwd doesn't matter:** `query`, `search`,
+  `callers`, `find-idl-impl`. These read `index.db` / `search.db` only;
+  paths come back with the repo prefix already baked in, so they work
+  from anywhere (including `~`, `/tmp`, or the repolayer source tree).
+- **Source-reading commands, cwd must be inside the target repo:**
+  `outline`, `show`, `digest`, `surface`, `deps`, `reverse-deps`,
+  `find-related`, `cycles`. These resolve paths relative to cwd; running
+  them from the wrong directory yields `path not found` or
+  `no adapter for ...`. Workflow: get an absolute path from `query` /
+  `search`, then `cd <repo-root>` before invoking.
+  Note that some session hooks reset cwd between commands, so prefer
+  `cd /Users/bytedance/<repo> && repolayer outline biz/handler/x.go`
+  rather than relying on a previous `cd` line.
 
-**追接口/IDL 全链路的标准动作**：
+**The standard cross-cutting trace for an API or IDL endpoint:**
 
 ```
-# Step 1：在任何目录下，一次拿到全链路节点
+# Step 1 — single query, returns every relevant node across repos
 repolayer query "<MethodName>"
-# 结果包含：handler 多个仓 + IDL 定义（http_idl/rpc_idl）+ TS stubs + router 入口
+# Hits: BE handlers in every repo + IDL definitions (http_idl / rpc_idl)
+#       + TS stubs + router registrations
 
-# Step 2：根据上一步的 repo + path，cd 进对应仓再 outline / show
+# Step 2 — pull function bodies once you've picked the right hit
 cd /Users/bytedance/<be-repo> && repolayer outline biz/handler/<file>.go
 cd /Users/bytedance/<be-repo> && repolayer show biz/handler/<file>.go <Method>
 
-# Step 3（可选）：URL 反查前端调用方
+# Step 3 — bonus: server-side impls of the IDL method, ranked by confidence
+repolayer find-idl-impl <MethodName>
+
+# Step 4 — optional: find frontend call sites by URL
 repolayer search "/api/v1/<path>"
 ```
 
-**不要**为了找 IDL 定义专门 `find ... -name "*.proto" | xargs grep`——`query` 已经包含
-`idlmethod` / `idlservice` 节点，IDL 定义会和业务 handler 一起出现在结果里。
+**Do not** grep IDL files manually (`find ... -name "*.proto" | xargs grep`).
+`query` already includes `idlmethod` / `idlservice` nodes; IDL hits
+land in the same result set as BE handlers.
 
-**默认顺序**：先 `query` / `search` 定位 → 再 `outline` 看结构 → 再 `show` 取函数体。
-不要直接 `Read` 整个文件，除非已经用 outline / show 拿到上下文还不够。
+**Default ordering:** `query` / `search` to locate, then `outline` for
+structure, then `show` to extract the body. Don't `Read` an entire file
+unless outline / show didn't give you enough context.
 
-**多仓时优先加 `--repo`**：在 ttec 这种 40+ 仓的工作区里，跨仓 BM25 噪声会把
-真正相关的本仓结果挤出 top-K。如果你已经知道答案在哪个仓，加 `--repo`
-能让 BM25 IDF 在该仓内重新计算，结果更贴合。仓名拼错时 CLI 会列 5 个最近候选，
-直接抓正确名重试即可。
+**Prefer `--repo` in large workspaces.** In a 40+ repo workspace
+(ttec), cross-repo BM25 noise can push the right hit out of top-K. If
+you already know the repo, `--repo` recomputes IDF inside that repo so
+results stop fighting unrelated workspace terms. Typos produce a
+"did you mean ..." with the five closest names — pick one and retry.
 
-**🚫 降级铁律（千万别踩）**：
+**🚫 Fallback discipline (don't break these):**
 
-1. **`repolayer show` 报 `no adapter for ...`** 只代表那一种文件类型不支持
-   （目前 IDL `.proto` / `.thrift` 不支持 `show`）。**不要因此放弃整个 repolayer**——
-   IDL 内容继续用 `repolayer query "<Method>"` 看节点位置 + `grep -n "<Method>" <proto-file>`
-   定位行号，**不要**触发任何 `grep -r` 全盘扫描。
+1. **`repolayer show` saying `no adapter for ...`** means *that one
+   file type* isn't supported (today: `.proto` / `.thrift`). Don't
+   abandon repolayer because of it — keep using `repolayer query
+   "<Method>"` for IDL nodes and finish locating with
+   `grep -n "<Method>" <single-proto-file>`. Never escalate to a
+   tree-wide `grep -r`.
 
-2. **永远不要** `grep -r` / `grep -rln` / `find` 直接扫这两个目录：
-   - `/Users/bytedance/`（家目录，几十个仓 + node_modules，分钟级）
-   - `/Users/bytedance/web_monorepo-master/packages/`（前端 monorepo，~2 分钟）
+2. **Never** `grep -r` / `grep -rln` / `find` across:
+   - `/Users/bytedance/` (the home dir — dozens of repos plus
+     node_modules, minutes long)
+   - `/Users/bytedance/web_monorepo-master/packages/` (frontend monorepo,
+     ~2 min)
 
-   harness 会自动把这种命令转后台并要你 polling
-   `/private/tmp/claude-501/.../tasks/*.output`——这条路必慢。
-   **正确替代**：`repolayer search "<term>"` 毫秒返回；范围已知就加 `--repo <name>`
-   或单仓 `--repo` 多次调用，比一次全盘 grep 快 100 倍以上。
+   The harness turns commands that big into a background task you have
+   to poll. Use `repolayer search "<term>"` (milliseconds) or
+   `repolayer search "..." --repo <name>` instead — easily 100× faster.
 
-3. `repolayer query` / `search` 0 命中**不代表索引坏了**，可能是：
-   - query 字面错（驼峰 vs snake_case：试两种）
-   - 仓不在索引清单（看 `repolayer.yml`，问用户加仓而不是 fallback grep 整个 `~/`）
-   - 真的不存在（这时候 `rg` 单仓内可以兜底，但**不要**扫 `~/`）
+3. **`repolayer query` / `search` returning zero hits** doesn't mean the
+   index is broken. Common causes:
+   - The query string is wrong (try snake_case vs camelCase, swap order).
+   - The repo isn't in the index (check `repolayer.yml`; ask the user
+     to add it rather than falling back to `grep -r ~/`).
+   - It really doesn't exist (`rg` inside one repo is fine for tie-break,
+     but still don't scan `~/`).
 
 ---
 
-## 命令参考
+## Command reference
 
 ### `repolayer query <text> [--repo <name>] [--json]`
 
-在 graph 里查 declaration——含 type / method / function / **idlmethod / idlservice**。
-对 symbol 名和 path **同时**做子串匹配，返回 `repo \t path::symbol \t line`，最多 20 条。
+Substring match against declaration symbols across all repos. Kinds in
+the hit set: `type` / `method` / `function` / **`idlmethod`** /
+**`idlservice`**. Matches against both the symbol name and the file
+path; returns up to 20 rows as `repo \t path::symbol \t line`.
 
-**IDL 也在结果里**：追接口全链路时，`query "GetXxx"` 一次能同时返回业务 handler、
-http_idl 的 proto rpc 定义、rpc_idl 的 thrift method 定义，不用专门 grep IDL 文件。
+IDL is included: tracing an endpoint via `query "GetXxx"` returns BE
+handlers, http_idl proto rpc definitions, and rpc_idl thrift methods in
+one shot — no separate grep over `.proto` / `.thrift`.
 
-`--repo <name>` 限制结果到指定仓（必须匹配 `repolayer.yml` 里的 name；
-拼错时报错并给最近建议）。多仓里同名符号太多时优先加 `--repo` 收敛。
+`--repo <name>` restricts to one repo (must match a name in
+`repolayer.yml`; typos error out with a "did you mean ..." list). Prefer
+`--repo` when you know the answer's location.
 
 ```
 $ repolayer query "GetDiscountList"
@@ -126,118 +160,213 @@ oec_promotion_voucher_api	biz/handler/get_discount_list.go::NewGetDiscountListHa
 ...
 ```
 
-`--json` 返回 `{schema_version, query, matches: [{repo, path, symbol, kind, line}]}`。
-0 命中时退出码仍为 0，stdout 给降级建议（试 `search` 或 `rg`）。
+`--json` returns `{schema_version, query, repo_filter, matches: [{repo,
+path, symbol, kind, line}]}`. Zero hits exits with code 0 and a
+fallback hint on stdout (try `search`, try `rg` inside one repo).
+
+### `repolayer callers <symbol> [--depth N] [--repo <name>] [--json]`
+
+Inbound `Calls` edges for `symbol` — i.e. "who calls this." Aggregates
+across **every node whose symbol matches exactly**, so a function
+defined in multiple repos surfaces all of its caller sets at once.
+Each row pairs the caller with the target it reaches, so multi-definition
+results don't get conflated.
+
+Two sources feed `Calls` edges into the graph:
+
+1. **Auto-extracted at build time** (default): the indexer walks
+   ast-grep call expressions and emits a Calls edge from the caller's
+   file (`Module` node) to the callee `Function` / `Method` node **only
+   when the callee name resolves uniquely across the workspace**.
+   Confidence is therefore always 1.0 for these edges. Ambiguous names
+   (`init`, `Get`, `parse`, lowercase short words) are skipped to keep
+   noise down.
+2. **Manually declared** via `links: [{kind: calls, from: <repo>, to:
+   <repo>}]` in `repolayer.yml`. Edge granularity is repo-level here,
+   not function-level.
+
+Caller granularity for auto-extracted edges is **the file**, not the
+enclosing function. The CLI prints `caller -> target` lines so you can
+see exactly which file reached which target. Once you've picked a
+caller file, follow up with `repolayer outline <caller-path>` and
+`repolayer show <caller-path> <function>` to pinpoint the call site.
+
+```
+$ repolayer callers computeMembershipDigest
+# 1 definition(s) of 'computeMembershipDigest', 1 caller(s) within depth 1
+@def	r	src/digest_util.ts::computeMembershipDigest	1
+# caller -> target  (repo\tpath::symbol\tline\tconfidence)
+r	src/auth_caller.ts::	    conf=1.00	-> src/digest_util.ts::computeMembershipDigest
+```
+
+`--depth N` walks N hops along inbound Calls (default 1). `--repo`
+restricts which *definitions* are considered (callers from anywhere
+still surface). Zero callers prints an explanation: extraction is name-
+unique, so absence may just mean the callee name isn't unique
+workspace-wide.
+
+`--json` envelope:
+`{schema_version, symbol, depth, repo_filter, definitions: [...],
+callers: [{caller, target, confidence}]}`.
+
+### `repolayer find-idl-impl <method> [--service <name>] [--no-implements] [--no-invokes] [--json]`
+
+Given an IDL method name, returns server-side implementations
+(`Implements` edges, e.g. Go handler files) and client-side invocations
+(`Invokes` edges, e.g. TS API stub files), **sorted by edge
+confidence**. Confidence semantics:
+
+| Value | Meaning |
+|---|---|
+| 1.0 | AST-exact match (e.g. proto-declared) |
+| 0.7 | AST call expression seen in a code file |
+| 0.4 | Path heuristic only (e.g. `services/` directory + matching name) |
+
+If `<method>` is ambiguous (`Get`, `List`), disambiguate with
+`--service <ServiceName>`. `--no-implements` / `--no-invokes` scope the
+result.
+
+```
+$ repolayer find-idl-impl GetBenefit
+# IDL method: idl::MemberBenefitService.GetBenefit  (user.proto:5)
+# 1 implementation(s)  (server-side, sorted by confidence desc)
+impl	server_repo	services/member_service.go::	conf=0.70
+# 1 invoker(s)  (client-side, sorted by confidence desc)
+call	client_repo	src/api.ts::	conf=0.70
+# confidence guide: 1.0=AST exact, 0.7=AST call match, 0.4=path heuristic
+```
+
+`--json` returns `{schema_version, method, implements, invokes}` with
+every edge carrying its `confidence` field — agents that want to filter
+out heuristic guesses should drop everything below 0.7.
 
 ### `repolayer search <query> [-k N] [--repo <name>] [--json] [--full-content]`
 
-混合 BM25 + 语义检索，返回 top-K 个 chunk（默认 10）。
-索引粒度是 declaration（function / method / type 头），不是逐行 —— 比 `rg` 信噪比高，
-但找具体行不如 `rg`。
+Hybrid BM25 + semantic search; returns the top-K chunks (default 10).
+Indexing granularity is declaration (function / method / type header),
+not line — so signal-to-noise is higher than `rg` for behaviour
+descriptions but lower for pinpoint line lookups.
 
-text 输出第一行带 `lane=...` 标识，每行 `[i] repo \t path:start-end \t score`。
-JSON 默认**不返 chunk 内容**，只返 200 字符 `preview`，envelope 含 `lane` 字段。需要完整函数体时：
+Text output prefixes a `lane=...` indicator; each row is `[i] repo \t
+path:start-end \t score`. JSON output omits chunk bodies by default
+(only a 200-char `preview`), since `path:line_range` is enough to
+follow up with `repolayer show`. Pass `--full-content` if you really
+need the body inline (mind the token cost).
 
-- 已知 `path:line_range` → `repolayer show <path> <symbol>` （AST-边界精确）
-- 真要原文 chunk → 加 `--full-content`（注意 token 成本）
+`--repo <name>` restricts to a single repo — BM25 IDF is recomputed
+inside that repo so common workspace terms don't drown out local
+relevance.
 
-`--repo <name>` 限制到单个仓。多仓 query 默认会被高 IDF 跨仓项挤掉本仓内的"刚好够相关"
-结果——加 `--repo` 后 BM25 在该仓内重新算 IDF，结果排名更贴合该仓自身。
-拼错仓名时会报 "Did you mean ..." + 最接近的 5 个候选名，可直接抓正确名重试。
+**`lane` field semantics (affects how much to trust the result):**
 
-**lane 字段含义（影响结果可信度）**：
-
-| lane | 含义 | 怎么对待 |
+| lane | Meaning | How to treat |
 |---|---|---|
-| `fusion` | BM25 + 语义都命中并融合 | 最可信。但 query 含很多通用词（`token`、`get`、`list`）时，BM25 也会被噪声拖累 —— 看到结果落在 svg / asset / lockfile 里就是这种情况 |
-| `bm25_only` | 只有词法匹配 | 关键词搜得到、行为描述大概率搜不到。换 query 或回退 `rg` |
-| `semantic_only` | 只有语义匹配（已经过严格阈值） | query 没词法锚点。结果排名偏弱，建议交叉验证 |
-| `substring` | 兜底 LIKE 匹配 | 噪音很多，仅作候选。优先 `rg` |
+| `fusion` | BM25 and semantic both fired | Most trustworthy. If your query has lots of common tokens (`token`, `get`, `list`) BM25 itself gets noisy — watch for hits inside svg / asset / lockfile paths and discount them. |
+| `bm25_only` | Lexical match only | Good for known keywords, bad for behaviour descriptions. Reword the query or fall back to `rg`. |
+| `semantic_only` | Semantic match only (already past a strict threshold) | Useful when there's no lexical anchor. Rank tends to be weaker; cross-check before acting. |
+| `substring` | LIKE fallback | Noisy; treat as candidates only. `rg` is usually better. |
 
 ### `repolayer outline <path...> [--json]`
 
-打印文件 / 目录的 declaration tree（签名 + 行号，**不含函数体**）。
-比 `cat` 全文省 ~80% token。多 path 时聚合输出。
+Declaration tree (signatures + line ranges, **no function bodies**).
+Saves ~80% of the tokens versus dumping the file. Pass multiple paths
+to get a combined output.
 
 ### `repolayer show <file> <symbol> [<symbol>...] [--json]`
 
-按 AST 边界提取一个或多个 symbol 的源码（含函数体）。
-Symbol 用后缀匹配：`TakeDamage` 或 `Player.TakeDamage` 消歧。
-比 `sed -n 'A,Bp'` 估算行号靠谱。
+AST-bounded source for one or more symbols inside `<file>`. Symbol
+names are suffix-matched, so `TakeDamage` and `Player.TakeDamage` both
+work. Beats line-range `sed` because boundaries are exact.
 
 ### `repolayer digest <path> [--json]`
 
-模块 public API 一页摘要。比 outline 更密、跨多文件。适合快速建立 mental model。
+One-page public-API map for a module — denser than `outline` and
+spans multiple files. Useful when building a mental model fast.
 
 ### `repolayer surface <path> [--json]`
 
-打印包对外的 public API（解析 Rust `pub use` / Python `__all__` /
-TS barrel `export {}` / Scala `export`）。
-和 `digest` 区别：surface 只看 re-export 后真正暴露的 API；digest 还包含模块内部 public 声明。
+Prints the published public API of a package by following re-exports
+(`pub use` in Rust, `__all__` in Python, barrel `export {}` in TS,
+`export` in Scala). The difference from `digest`: `surface` shows only
+what's actually re-exported; `digest` shows internal public
+declarations too.
 
 ### `repolayer deps <path> [--depth N] [--json]`
 
-forward dep：这个文件 import 了什么。`--depth` 控制 BFS 深度，默认 1。
+Forward dependency: what this file imports. `--depth` is BFS depth,
+default 1.
 
 ### `repolayer reverse-deps <path> [--json]`
 
-reverse dep：谁 import 了这个文件，跨仓。
+Reverse dependency: who imports this file, across repos.
 
 ### `repolayer cycles [<path>] [--json]`
 
-import 循环检测（Tarjan SCC）。有循环时退出码 1（适合 CI gate）。
+Tarjan SCC over the import graph. Exits 1 if any cycle is found
+(suitable for a CI gate).
 
 ### `repolayer find-related <file>:<line> [-k N] [--json]`
 
-找语义相似的 chunk。`<file>:<line>` 直接粘贴自 search 输出。
+Structurally similar chunks. Paste a `<file>:<line>` straight from a
+`search` result.
 
 ---
 
-## 与 grep / find / Read 的关系
+## Relationship to grep / find / Read
 
-repolayer 不取代 `rg` / `grep` / `find` / `Read`：
+repolayer doesn't replace `rg` / `grep` / `find` / `Read`:
 
-| 想干的事 | 优先用 | 原因 |
+| Goal | Prefer | Why |
 |---|---|---|
-| 找一个符号定义（含 IDL method / service） | `repolayer query` | 已建索引，含 IDL 节点 |
-| 关键词 / 行为描述 / API URL / 字面字符串 | `repolayer search` | chunk content 被索引，URL 能命中 |
-| 看文件结构 | `repolayer outline` | token 省 5-10 倍 |
-| 提取一个函数体 | `repolayer show` | AST 边界，不用估行号 |
-| 找一行注释 / 一个 import 路径具体文本 | `rg` | 单行字面、search 的 chunk 太粗 |
-| 看一个具体大文件改没改 | `Read` + offset/limit | repolayer 不存全文 |
+| Find a symbol definition (incl. IDL method / service) | `repolayer query` | Pre-built index, IDL included |
+| Behaviour description / API URL / literal string | `repolayer search` | Chunk content is indexed, URLs hit cleanly |
+| Skim file structure | `repolayer outline` | 5–10× less token |
+| Pull one function body out | `repolayer show` | AST boundaries, no line estimation |
+| Find who calls function X | `repolayer callers` | Uses precomputed Calls edges; no per-call grep |
+| IDL method → server impl + client call sites | `repolayer find-idl-impl` | Confidence-ranked, knows about Implements vs Invokes |
+| Find one comment / one literal import path | `rg` | Single-line literal; chunks are too coarse |
+| Inspect one big file (did this change?) | `Read` + offset/limit | repolayer doesn't store full file text |
 
-**典型反模式**：
-- ❌ 用 `rg "FuncName"` 找符号定义 → ✅ 用 `query`
-- ❌ `Read` 整个 1000 行 handler.go → ✅ 先 `outline` 再 `show <file> <symbol>`
-- ❌ 用 `search --full-content` 一次拉 10 个 chunk 全文 → ✅ 默认 preview 已够定位，需要再 `show`
-- ❌ `search "..."` 后用 jq 过滤到某仓 → ✅ 直接 `--repo <name>`，BM25 也会在仓内重新算 IDF
-- ❌ 同名符号在多仓里 `query` 后人肉挑 → ✅ `query "..." --repo <name>` 直接收敛
-- ❌ `find http_idl rpc_idl -name "*.proto" \| xargs grep "Method"` → ✅ `repolayer query "Method"` 一次拿到所有 IDL 定义 + 业务 handler
-- ❌ `grep -rn "/api/v1/foo"` 在 monorepo 里找前端调用方 → ✅ `repolayer search "/api/v1/foo"`，命中后再用 grep 收敛到具体文件
+**Common anti-patterns:**
 
-如果 `query` / `search` 返回 0 条，再回退到 `rg` 字面查（可能符号在注释 / 字符串里、
-或文件未提交导致 git diff 没刷过来）。
+- ❌ `rg "FuncName"` to find a definition → ✅ `repolayer query`
+- ❌ `rg "FuncName\\("` to find callers → ✅ `repolayer callers FuncName`
+- ❌ `Read` a 1000-line `handler.go` → ✅ `outline` then `show <file> <symbol>`
+- ❌ `search --full-content` pulling 10 full chunks → ✅ default preview is enough; `show` if not
+- ❌ `search "..." | jq ... | grep <repo>` → ✅ `--repo <name>` (also recomputes IDF inside the repo)
+- ❌ Same-named symbol in multiple repos: `query` then manual filter → ✅ `query "..." --repo <name>`
+- ❌ `find http_idl rpc_idl -name "*.proto" \| xargs grep "Method"` → ✅ `repolayer query "Method"` (IDL is in the result set)
+- ❌ `grep -rn "/api/v1/foo"` to find frontend call sites → ✅ `repolayer search "/api/v1/foo"`
+
+If `query` / `search` returns zero, *then* fall back to `rg` for a
+literal lookup (the symbol may live in a comment or string, or the file
+isn't committed yet so `repolayer update` hasn't seen it).
 
 ---
 
-## 错误信息含义
+## Error messages
 
-| 输出 | 含义 |
+| Output | Meaning |
 |---|---|
-| `no index found at .repolayer/index.db — run \`repolayer build\` first` | 索引未建 |
-| `no .repolayer/ index found` | 同上（其他子命令的提示文案） |
-| `# no matches / # no results` | 索引里没匹配。优先按 stdout 提示降级 |
-| `no callers found for <path>` | reverse-deps 0 命中。可能是真没人调，也可能是该文件不在已索引仓里 |
-| `Error: unknown repo 'xxx'. Did you mean: a, b, c, ...` | `--repo` 拼错。从建议里抓正确名直接重试，**不要**回退 `rg` |
-| `# WARNING: N parse errors`（outline）| 解析失败，outline 部分缺，对应文件直接 `Read` 兜底 |
+| `no index found at .repolayer/index.db — run \`repolayer build\` first` | Index not built |
+| `no .repolayer/ index found` | Same, from another subcommand |
+| `# no matches` / `# no results` | The index has no match. Follow the stdout fallback hint |
+| `# no exact match for symbol 'X'` (callers) | `callers` requires exact symbol name; try `query "X"` to see candidates |
+| `# no inbound Calls edges` (callers) | Definition exists but no Calls edges point at it. Either the callee name isn't unique workspace-wide (auto-extraction is unique-only) or it's only invoked through dynamic dispatch / reflection |
+| `# no IDL method found matching 'X'` (find-idl-impl) | The name doesn't match any `idlmethod` node. Try `query "X"` |
+| `no callers found for <path>` (reverse-deps) | File-level reverse-deps came up empty; either nothing imports it or it isn't in an indexed repo |
+| `Error: unknown repo 'xxx'. Did you mean: a, b, c, ...` | `--repo` typo. Pick from the suggestion and retry — **don't** fall back to `rg` |
+| `# WARNING: N parse errors` (outline) | Parser couldn't handle parts of the file; `Read` it directly if outline is missing pieces |
 
-`repolayer update` 增量刷（只重做 git diff 命中文件）；`repolayer build` 全量重建。
+`repolayer update` refreshes incrementally (only files touched by `git diff`);
+`repolayer build` does a full rebuild.
 
 ---
 
 ## SQL escape hatch
 
-`.repolayer/index.db` 是普通 SQLite 库，CLI 表达不出来的图查询可以直接 SQL：
+`.repolayer/index.db` is a plain SQLite file. Any graph query the CLI
+can't express directly can be done in SQL:
 
 ```bash
 sqlite3 .repolayer/index.db "
@@ -250,14 +379,15 @@ WHERE n_idl.kind = 'idlmethod' AND n_idl.symbol = 'GetDiscountList'
 ORDER BY e.confidence DESC;"
 ```
 
-Schema：
+Schema:
 
 ```sql
 nodes(id, kind, repo, path, symbol, summary, visibility, native_kind, loc_start, loc_end, deprecated)
 -- kind ∈ repo / module / type / method / function / idlservice / idlmethod
 edges(from_id, to_id, kind, confidence)
 -- kind ∈ contains / imports / calls / implements / invokes / defines / extends
--- confidence: 1.0 = ast-derived；< 1.0 = 启发式（path 模式 / 名称匹配）
+-- confidence: 1.0 = AST-derived; < 1.0 = heuristic (path pattern, ambiguous name)
 ```
 
-`.repolayer/{outline,deps,search}.db` 各有独立 schema；大多数图查询用 `index.db` 就够。
+`.repolayer/{outline,deps,search}.db` each have their own schema; most
+graph queries only need `index.db`.

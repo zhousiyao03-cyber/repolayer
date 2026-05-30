@@ -47,6 +47,33 @@ fn dispatches_markdown() {
 }
 
 #[test]
+fn dispatches_swift() {
+    let f = write_temp(".swift", "struct Point { let x: Int }\n");
+    let r = parse_file(f.path()).expect("parsed");
+    assert_eq!(r.language, "swift");
+    assert!(r.declarations.iter().any(|d| d.name == "Point"));
+}
+
+#[test]
+fn dispatches_objc() {
+    let f = write_temp(".m", "@interface Foo : NSObject\n@end\n");
+    let r = parse_file(f.path()).expect("parsed");
+    assert_eq!(r.language, "objc");
+    assert!(r.declarations.iter().any(|d| d.name == "Foo"));
+}
+
+#[test]
+fn dispatches_objc_header() {
+    let f = write_temp(".h", "@protocol Drawable\n- (void)draw;\n@end\n");
+    let r = parse_file(f.path()).expect("parsed");
+    assert_eq!(r.language, "objc");
+    assert!(r
+        .declarations
+        .iter()
+        .any(|d| matches!(d.kind, DeclarationKind::Interface)));
+}
+
+#[test]
 fn returns_none_for_unknown_extension() {
     let f = write_temp(".xyz", "...");
     assert!(parse_file(f.path()).is_none());

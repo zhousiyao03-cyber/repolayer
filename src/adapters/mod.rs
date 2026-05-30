@@ -12,9 +12,11 @@ pub mod idl;
 pub mod java;
 pub mod kotlin;
 pub mod markdown;
+pub mod objc;
 pub mod python;
 pub mod rust;
 pub mod scala;
+pub mod swift;
 pub mod typescript;
 
 use crate::core::declaration::ParseResult;
@@ -41,6 +43,16 @@ pub fn parse_file(path: &Path) -> Option<ParseResult> {
         return Some(r);
     }
 
+    // Objective-C uses bare tree-sitter (tree-sitter-objc), not ast-grep-language.
+    // `.m` is an ObjC implementation file and `.mm` is ObjC++. `.h` headers are
+    // routed here because this project ships no C/C++ adapter, so a header is
+    // most usefully parsed as Objective-C.
+    if matches!(ext, "m" | "mm" | "h") {
+        let mut r = objc::parse_objc(path, source.as_bytes());
+        populate_markers(&mut r.declarations, r.language);
+        return Some(r);
+    }
+
     let lang = SupportLang::from_path(path)?;
     let doc = lang.ast_grep(source.clone());
     let root = doc.root();
@@ -55,6 +67,7 @@ pub fn parse_file(path: &Path) -> Option<ParseResult> {
         SupportLang::Java => java::JavaAdapter.parse(path, source.as_bytes(), root),
         SupportLang::Kotlin => kotlin::KotlinAdapter.parse(path, source.as_bytes(), root),
         SupportLang::Scala => scala::ScalaAdapter.parse(path, source.as_bytes(), root),
+        SupportLang::Swift => swift::SwiftAdapter.parse(path, source.as_bytes(), root),
         _ => return None,
     };
 

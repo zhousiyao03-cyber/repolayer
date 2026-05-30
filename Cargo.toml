@@ -47,6 +47,7 @@ memmap2 = "0.9"
 wide = "0.7"
 xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 aho-corasick = "1.1"
+tree-sitter-objc = "3.0.2"
 
 [dev-dependencies]
 assert_cmd = "2.0"

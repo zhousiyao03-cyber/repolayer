@@ -1,13 +1,18 @@
 # repolayer
 
+[![CI](https://github.com/zhousiyao03-cyber/repolayer/actions/workflows/ci.yml/badge.svg)](https://github.com/zhousiyao03-cyber/repolayer/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 > A cross-repo code-index CLI for AI agents. Higher signal-to-noise than
 > grep, more cross-repo than LSP, and far cheaper in tokens than reading
 > whole files.
 >
 > Built on top of [aeroxy/ast-outline](https://github.com/aeroxy/ast-outline) —
-> extended with multi-repo workspaces, IDL (protobuf / thrift) as
-> first-class graph nodes, and cross-repo Implements / Invokes / Imports
-> / Calls edges.
+> extended with multi-repo workspaces, 12 source-language adapters
+> (including Swift and Objective-C), IDL (protobuf / thrift) as
+> first-class graph nodes, cross-repo Implements / Invokes / Imports /
+> Calls edges, and a pluggable embedding backend (local potion model,
+> Ollama, or any OpenAI-compatible HTTP endpoint) for semantic search.
 
 ## Status: v0.2.0-alpha
 
@@ -18,8 +23,10 @@
   (per-file declaration trees), `deps.db` (file-level dependency graph),
   `search.db` (BM25 + dense embedding chunks via
   [sqlite-vec](https://github.com/asg017/sqlite-vec)).
-- **10 source-language adapters** via `ast-grep-core`: Rust, C#, Python,
-  TypeScript, JavaScript, Java, Kotlin, Scala, Go, Markdown.
+- **12 source-language adapters**: Rust, C#, Python, TypeScript,
+  JavaScript, Java, Kotlin, Scala, Go, Swift, Markdown via
+  `ast-grep-core`, plus Objective-C via bare tree-sitter
+  (`tree-sitter-objc`, like the IDL parsers).
 - **2 IDL parsers** (bare tree-sitter): protobuf, thrift.
 - Single static binary (~47 MB release build).
 
@@ -146,7 +153,32 @@ llm:
   provider: anthropic       # or deepseek
   api_key_env: ANTHROPIC_API_KEY
   summary: false
+
+# Optional: pluggable embedding backend for semantic search.
+# Defaults to the built-in 256-dim potion model (offline, no config needed).
+# embedding:
+#   provider: ollama        # local sidecar: `ollama serve`, zero auth
+#   model: qwen3-embedding:0.6b
+#   endpoint: http://localhost:11434
+#   dim: 1024
+#
+#   # ...or any OpenAI-compatible HTTP endpoint:
+#   # provider: http
+#   # model: your-embedding-model
+#   # endpoint: https://api.openai.com/v1/embeddings
+#   # api_key_env: EMBEDDING_API_KEY
 ```
+
+### Embedding backends
+
+The dense-search lane is pluggable via the `embedding` block above:
+
+- **`potion-local`** (default) — built-in 256-dim model2vec embedder. Offline,
+  no API key, downloaded once on first build. Good enough for most repos.
+- **`ollama`** — point at a local `ollama serve` daemon to use a code-aware
+  multilingual model (e.g. `qwen3-embedding`) without any GGUF wiring.
+- **`http`** — any OpenAI-compatible `/v1/embeddings` endpoint. Auto-batches,
+  retries on 5xx/429/timeout, and rate-limits client-side.
 
 ## Architecture
 
@@ -175,7 +207,7 @@ llm:
 │    search.db   chunks + 256-d embeddings (vec0 virtual table)       │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Parser layer                                                       │
-│    adapters/      10 source-language adapters (ast-grep-core)       │
+│    adapters/      12 source-language adapters (ast-grep + tree-sitter)│
 │    adapters/idl/  protobuf + thrift (bare tree-sitter)              │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Cross-repo gluing (linker/)                                        │

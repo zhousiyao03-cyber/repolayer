@@ -74,7 +74,7 @@ pub fn detect(graph: &DepGraph, min_size: usize) -> Vec<Cycle> {
             Some(Cycle { members })
         })
         .collect();
-    cycles.sort_by(|a, b| b.members.len().cmp(&a.members.len()));
+    cycles.sort_by_key(|c| std::cmp::Reverse(c.members.len()));
     cycles
 }
 

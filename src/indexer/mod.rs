@@ -793,7 +793,7 @@ async fn try_embed_async(
         // writes silently when fed thousands of autocommit inserts.
         let pairs: Vec<(i64, Vec<f32>)> = chunks
             .iter()
-            .zip(vectors.into_iter())
+            .zip(vectors)
             .map(|((id, _, _, _, _), v)| (*id, v))
             .collect();
         if let Err(e) = store.upsert_embeddings_batch(&pairs) {

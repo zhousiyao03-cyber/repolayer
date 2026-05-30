@@ -128,10 +128,8 @@ pub fn parse_cargo_toml(path: &Path) -> Option<CargoManifest> {
                     }
                 }
             }
-            "[workspace]" => {
-                if key == "members" {
-                    m.workspace_members = _parse_string_array(value);
-                }
+            "[workspace]" if key == "members" => {
+                m.workspace_members = _parse_string_array(value);
             }
             _ => {}
         }

@@ -369,7 +369,14 @@ fn consume_ts_require<'a, D: Doc>(node: &Node<'a, D>, out: &mut Vec<RawImport>) 
 
 fn strip_quotes(s: &std::borrow::Cow<'_, str>) -> String {
     let t = s.trim();
-    if (t.starts_with('"') && t.ends_with('"')) || (t.starts_with('\'') && t.ends_with('\'')) {
+    // `t.len() >= 2` guards against a lone quote (`"` or `'`): without it,
+    // a single-char token satisfies both `starts_with` and `ends_with`, and
+    // `t[1..t.len() - 1]` becomes `1..0` — an invalid range that panics.
+    // Malformed Scala/TS import paths (or tree-sitter skipping a child node)
+    // can yield such lone-quote tokens.
+    if t.len() >= 2
+        && ((t.starts_with('"') && t.ends_with('"')) || (t.starts_with('\'') && t.ends_with('\'')))
+    {
         t[1..t.len() - 1].to_string()
     } else {
         t.to_string()
@@ -668,4 +675,32 @@ fn consume_go_spec<'a, D: Doc>(node: &Node<'a, D>, out: &mut Vec<RawImport>) {
         local_name: name,
         raw_path: Some(stripped),
     });
+}
+
+#[cfg(test)]
+mod strip_quotes_tests {
+    use super::strip_quotes;
+    use std::borrow::Cow;
+
+    #[test]
+    fn lone_double_quote_does_not_panic() {
+        assert_eq!(strip_quotes(&Cow::Borrowed("\"")), "\"");
+    }
+
+    #[test]
+    fn lone_single_quote_does_not_panic() {
+        assert_eq!(strip_quotes(&Cow::Borrowed("'")), "'");
+    }
+
+    #[test]
+    fn strips_matched_quotes() {
+        assert_eq!(strip_quotes(&Cow::Borrowed("\"foo/bar\"")), "foo/bar");
+        assert_eq!(strip_quotes(&Cow::Borrowed("'baz'")), "baz");
+    }
+
+    #[test]
+    fn leaves_unquoted_and_mismatched_untouched() {
+        assert_eq!(strip_quotes(&Cow::Borrowed("foo")), "foo");
+        assert_eq!(strip_quotes(&Cow::Borrowed("\"mismatch'")), "\"mismatch'");
+    }
 }

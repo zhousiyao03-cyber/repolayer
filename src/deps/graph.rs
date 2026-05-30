@@ -62,11 +62,17 @@ pub struct DepEdge {
     pub line: u32,
     /// Local binding the importer sees (`as Quux`, `using A = X.Y`).
     /// `None` when the import preserves the original name.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    //
+    // NB: no `skip_serializing_if`. The deps cache (`deps/cache.rs`) round-trips
+    // this struct through bincode, which is *positional* — it writes/reads fields
+    // by order with no field tags. Skipping a `None` field on serialize shifts
+    // every following byte, so decode misaligns and `load_if_fresh` silently
+    // fails — defeating per-file incremental indexing (full rebuild every run).
+    #[serde(default)]
     pub local_name: Option<String>,
     /// Dotted/source path before resolution. Useful for inner-class
     /// display ("com.foo.Bar.Inner") and to keep raw context for debugging.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub raw_path: Option<String>,
 }
 
@@ -184,5 +190,56 @@ pub fn dedup_edges(graph: &mut DepGraph) {
     for edges in graph.forward.values_mut() {
         let mut seen = std::collections::HashSet::new();
         edges.retain(|e| seen.insert(e.target.clone()));
+    }
+}
+
+#[cfg(test)]
+mod dep_edge_bincode_tests {
+    use super::*;
+
+    /// `DepEdge` is persisted via bincode (positional encoding) in
+    /// `deps/cache.rs`. A `skip_serializing_if` on its `Option` fields would
+    /// drop bytes for `None` values and misalign every subsequent field on
+    /// decode. This round-trip — with `None` fields *between/before* populated
+    /// ones — fails if `skip_serializing_if` is ever reintroduced.
+    #[test]
+    fn dep_edge_round_trips_through_bincode_with_none_fields() {
+        let edges = vec![
+            DepEdge {
+                target: PathBuf::from("a/b.rs"),
+                kind: ImportKind::Use,
+                line: 3,
+                local_name: None, // None first — would shift the next edge's bytes
+                raw_path: Some("crate::a::b".to_string()),
+            },
+            DepEdge {
+                target: PathBuf::from("c/d.ts"),
+                kind: ImportKind::NamedFrom,
+                line: 10,
+                local_name: Some("Quux".to_string()),
+                raw_path: None,
+            },
+            DepEdge {
+                target: PathBuf::from("e/f.py"),
+                kind: ImportKind::From,
+                line: 1,
+                local_name: None,
+                raw_path: None,
+            },
+        ];
+
+        let cfg = bincode::config::standard();
+        let bytes = bincode::serde::encode_to_vec(&edges, cfg).expect("encode");
+        let (decoded, _): (Vec<DepEdge>, _) =
+            bincode::serde::decode_from_slice(&bytes, cfg).expect("decode");
+
+        assert_eq!(decoded.len(), edges.len());
+        for (orig, got) in edges.iter().zip(decoded.iter()) {
+            assert_eq!(orig.target, got.target);
+            assert_eq!(orig.kind, got.kind);
+            assert_eq!(orig.line, got.line);
+            assert_eq!(orig.local_name, got.local_name);
+            assert_eq!(orig.raw_path, got.raw_path);
+        }
     }
 }

@@ -1,0 +1,45 @@
+name: Bug report
+description: Something in repolayer doesn't work as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you run, what did you expect, and what actually happened?
+      placeholder: |
+        I ran `repolayer build` on a workspace with two repos and ...
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal repo, file, or config that reproduces the issue is the most helpful thing you can include.
+      placeholder: |
+        1. `repolayer init`
+        2. `repolayer build`
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: repolayer version
+      description: Output of `repolayer --version`.
+      placeholder: "0.2.0-alpha"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      placeholder: "macOS 15.5 (arm64) / Ubuntu 24.04"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste any error output. `RUST_LOG=debug` output is helpful for build/index issues.
+      render: shell

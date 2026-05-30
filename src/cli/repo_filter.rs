@@ -117,10 +117,7 @@ mod tests {
 
     #[test]
     fn substring_outranks_distant_edit() {
-        let known = vec![
-            "user_profile".to_string(),
-            "totally_unrelated".to_string(),
-        ];
+        let known = vec!["user_profile".to_string(), "totally_unrelated".to_string()];
         let err = require_repo("profile", &known).unwrap_err();
         let msg = err.to_string();
         // The substring match should appear before any distant-edit fallback.

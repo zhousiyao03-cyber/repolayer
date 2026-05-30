@@ -2,8 +2,8 @@
 
 use mockito::Server;
 use repolayer::config::EmbeddingConfig;
-use repolayer::search::http_embedder::HttpEmbedder;
 use repolayer::search::embedder::Embedder;
+use repolayer::search::http_embedder::HttpEmbedder;
 use serde_json::json;
 
 fn mock_cfg(server: &Server) -> EmbeddingConfig {

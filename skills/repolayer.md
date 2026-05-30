@@ -70,7 +70,7 @@ exit with "no index found" and a hint to run `repolayer build` (or set
   `no adapter for ...`. Workflow: get an absolute path from `query` /
   `search`, then `cd <repo-root>` before invoking.
   Note that some session hooks reset cwd between commands, so prefer
-  `cd /Users/bytedance/<repo> && repolayer outline biz/handler/x.go`
+  `cd /path/to/<repo> && repolayer outline path/to/handler.go`
   rather than relying on a previous `cd` line.
 
 **The standard cross-cutting trace for an API or IDL endpoint:**
@@ -82,8 +82,8 @@ repolayer query "<MethodName>"
 #       + TS stubs + router registrations
 
 # Step 2 — pull function bodies once you've picked the right hit
-cd /Users/bytedance/<be-repo> && repolayer outline biz/handler/<file>.go
-cd /Users/bytedance/<be-repo> && repolayer show biz/handler/<file>.go <Method>
+cd /path/to/<be-repo> && repolayer outline path/to/<file>.go
+cd /path/to/<be-repo> && repolayer show path/to/<file>.go <Method>
 
 # Step 3 — bonus: server-side impls of the IDL method, ranked by confidence
 repolayer find-idl-impl <MethodName>
@@ -100,8 +100,8 @@ land in the same result set as BE handlers.
 structure, then `show` to extract the body. Don't `Read` an entire file
 unless outline / show didn't give you enough context.
 
-**Prefer `--repo` in large workspaces.** In a 40+ repo workspace
-(ttec), cross-repo BM25 noise can push the right hit out of top-K. If
+**Prefer `--repo` in large workspaces.** In a 40+ repo workspace,
+cross-repo BM25 noise can push the right hit out of top-K. If
 you already know the repo, `--repo` recomputes IDF inside that repo so
 results stop fighting unrelated workspace terms. Typos produce a
 "did you mean ..." with the five closest names — pick one and retry.
@@ -116,10 +116,9 @@ results stop fighting unrelated workspace terms. Typos produce a
    tree-wide `grep -r`.
 
 2. **Never** `grep -r` / `grep -rln` / `find` across:
-   - `/Users/bytedance/` (the home dir — dozens of repos plus
+   - the workspace home dir (dozens of repos plus
      node_modules, minutes long)
-   - `/Users/bytedance/web_monorepo-master/packages/` (frontend monorepo,
-     ~2 min)
+   - a large frontend monorepo's `packages/` (~2 min)
 
    The harness turns commands that big into a background task you have
    to poll. Use `repolayer search "<term>"` (milliseconds) or
@@ -155,8 +154,8 @@ one shot — no separate grep over `.proto` / `.thrift`.
 ```
 $ repolayer query "GetDiscountList"
 # 20 matches for 'GetDiscountList' — repo	path::symbol	line
-oec_promotion_voucher_api	handler.go::GetDiscountList	206
-oec_promotion_voucher_api	biz/handler/get_discount_list.go::NewGetDiscountListHandler	63
+discount_api	handler.go::GetDiscountList	206
+discount_api	internal/handler/get_discount_list.go::NewGetDiscountListHandler	63
 ...
 ```
 

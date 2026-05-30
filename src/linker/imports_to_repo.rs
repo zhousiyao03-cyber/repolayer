@@ -16,7 +16,7 @@
 //!    Repo node, at confidence 0.9.
 //!
 //! Why a Repo-level edge rather than a file-level one: the imported `raw`
-//! is a Go *package* path (e.g. `code.byted.org/.../kitex_gen/ttec/sea_ug/funfair`),
+//! is a Go *package* path (e.g. `github.com/example/gen/foo/bar/baz`),
 //! and resolving that to a specific source file inside the target workspace
 //! repo requires Go module layout knowledge we don't (yet) bake in. The
 //! Repo-level edge is precise enough for "which workspace repos does this

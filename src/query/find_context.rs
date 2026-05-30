@@ -109,7 +109,16 @@ pub fn find_context(
     // most-specific match keeps the context item actionable.
     let mut search_ranked: Vec<(f32, Node)> = Vec::new();
     if let Some(search_store) = search {
-        let qv = crate::search::embed::try_encode_query(task);
+        // Only feed a query vector if the on-disk index dim matches what the
+        // legacy potion path can produce. If yml configured a wider index
+        // (e.g. remote embedding at 1024-dim) but we're calling from this sync path, drop
+        // to BM25-only — search_hybrid would otherwise skip the dense lane
+        // silently anyway, but being explicit here makes the intent clear.
+        let qv = if search_store.embedding_dim().ok() == Some(crate::search::embed::DIM) {
+            crate::search::embed::try_encode_query(task)
+        } else {
+            None
+        };
         let (hits, _lane) = search_store
             .search_hybrid(task, SEARCH_CANDIDATE_K, qv.as_deref(), None)
             .unwrap_or_default();
@@ -269,7 +278,7 @@ fn pick_node_for_hit(store: &Store, hit: &SearchHit) -> Result<Option<Node>> {
 /// Only `Imports`, `Invokes`, and `Implements` edge kinds are surfaced.
 ///
 /// Hydrates all candidate target nodes in a single `IN (...)` query rather
-/// than per-edge round trips — for a fully-stitched ttec result item this
+/// than per-edge round trips — for a fully-stitched cross-repo result item this
 /// turns ~5 single-row lookups into one.
 fn collect_cross_repo_edges(store: &Store, node: &Node) -> Result<Vec<EdgeRef>> {
     let edges: Vec<_> = store

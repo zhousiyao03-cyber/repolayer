@@ -94,7 +94,7 @@ fn callers_cli_surfaces_auto_extracted_edge() {
         .filter_map(|c| c["caller"]["path"].as_str())
         .collect();
     assert!(
-        paths.iter().any(|p| *p == "src/auth_caller.ts"),
+        paths.contains(&"src/auth_caller.ts"),
         "auth_caller.ts should appear as caller; got paths = {paths:?}"
     );
 }

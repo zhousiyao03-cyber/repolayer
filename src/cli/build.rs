@@ -17,5 +17,14 @@ pub async fn run() -> Result<()> {
         db_path.display()
     );
     println!("indexed {} nodes, {} edges", stats.nodes, stats.edges);
+    eprintln!(
+        "repolayer: build complete — nodes={}, edges={}, embed_requests={}, embed_retries={}, embed_chars={}, summary_count={}",
+        stats.nodes,
+        stats.edges,
+        stats.embed_requests,
+        stats.embed_retries,
+        stats.embed_input_chars,
+        stats.summary_count
+    );
     Ok(())
 }

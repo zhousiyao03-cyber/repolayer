@@ -33,6 +33,19 @@ pub struct Indexer {
 pub struct BuildStats {
     pub nodes: u64,
     pub edges: u64,
+    /// HTTP embedding requests that returned a successful response. Zero for
+    /// non-HTTP providers (potion-local / legacy).
+    pub embed_requests: u64,
+    /// HTTP embedder retry count (each retry attempt, not failed batches).
+    pub embed_retries: u64,
+    /// Total input characters sent to the embedder across the build. Useful
+    /// for cost estimation: providers typically charge per ~4 chars-per-token.
+    pub embed_input_chars: u64,
+    /// Number of dense vectors the embedder returned (≈ chunk count when
+    /// every batch succeeds).
+    pub embed_vectors: u64,
+    /// Number of (file, scope=module) summaries persisted into summary_chunks.
+    pub summary_count: u64,
 }
 
 impl Indexer {
@@ -47,8 +60,16 @@ impl Indexer {
             .with_context(|| format!("opening outline.db at {}", dir.display()))?;
         let deps_store = DepStore::open(&dir.join("deps.db"))
             .with_context(|| format!("opening deps.db at {}", dir.display()))?;
-        let search_store = SearchStore::open(&dir.join("search.db"))
-            .with_context(|| format!("opening search.db at {}", dir.display()))?;
+
+        // Target embedding dim — from config if explicitly set, otherwise legacy potion DIM.
+        let dim = config
+            .embedding
+            .as_ref()
+            .map(|e| e.dim as usize)
+            .unwrap_or(crate::search::embed::DIM);
+        let search_store =
+            crate::search::store::SearchStore::open_with_dim(&dir.join("search.db"), dim)
+                .with_context(|| format!("opening search.db at {}", dir.display()))?;
 
         Ok(Self {
             workspace_root,
@@ -180,7 +201,14 @@ impl Indexer {
         // embed automatically without the env var. If the model isn't present,
         // we log a one-line hint and fall through — search will use the
         // BM25/substring path.
-        match try_embed(&self.search_store, &code_repos) {
+        match try_embed_async(
+            &mut self.search_store,
+            &code_repos,
+            self.config.embedding.as_ref(),
+            &mut stats,
+        )
+        .await
+        {
             EmbedOutcome::Done(n) => info!("embedded {} chunks into search.db", n),
             EmbedOutcome::Skipped(reason) => {
                 info!(
@@ -197,7 +225,29 @@ impl Indexer {
             }
         }
 
-        // ── Phase D — optional LLM summaries (preserved from original) ─────────
+        // ── Phase D — optional LLM summary lane in search ─────────────────────
+        if let (Some(emb_cfg), Some(sum_cfg)) =
+            (self.config.embedding.as_ref(), self.config.summary.as_ref())
+        {
+            if sum_cfg.enabled {
+                match crate::llm::summary_store::run_summary_phase(
+                    &self.search_store,
+                    &code_repos,
+                    emb_cfg,
+                    sum_cfg,
+                )
+                .await
+                {
+                    Ok(n) => {
+                        info!("summary lane: wrote {n} summaries");
+                        stats.summary_count = n as u64;
+                    }
+                    Err(e) => warn!("summary phase failed: {e}"),
+                }
+            }
+        }
+
+        // Legacy: preserve module-summary-in-main-graph path (used by other tools).
         if let Some(llm_cfg) = &self.config.llm.clone() {
             if llm_cfg.enabled && llm_cfg.summary {
                 match build_llm_provider(llm_cfg) {
@@ -209,13 +259,10 @@ impl Indexer {
                         )
                         .await
                         {
-                            warn!("LLM summary phase failed (continuing): {}", e);
+                            warn!("legacy LLM summary phase failed: {}", e);
                         }
                     }
-                    Err(e) => warn!(
-                        "LLM provider construction failed (skipping summaries): {}",
-                        e
-                    ),
+                    Err(e) => warn!("legacy LLM provider construction failed: {}", e),
                 }
             }
         }
@@ -696,10 +743,91 @@ fn cached_model_present() -> bool {
 
 /// Embed every chunk in `search.db` for each of the supplied repos.
 ///
-/// Decides based on env vars + cache state whether to download, embed, or
-/// skip. Never panics; turns I/O errors into [`EmbedOutcome::Failed`].
-fn try_embed(
-    store: &crate::search::store::SearchStore,
+/// Uses the dynamic [`crate::search::embedder::Embedder`] when an
+/// `embedding:` block is present in the config, otherwise falls back to the
+/// legacy v0.2.0-alpha potion-code-16M path for back-compat. Never panics;
+/// turns I/O errors into [`EmbedOutcome::Failed`].
+async fn try_embed_async(
+    store: &mut crate::search::store::SearchStore,
+    repos: &[(String, std::path::PathBuf)],
+    cfg: Option<&crate::config::EmbeddingConfig>,
+    stats: &mut BuildStats,
+) -> EmbedOutcome {
+    let (embedder, http_stats) = match crate::search::embedder::make_embedder(cfg) {
+        Ok(Some(pair)) => pair,
+        Ok(None) => {
+            // No config — fall back to legacy potion behaviour.
+            return legacy_try_embed_potion(store, repos);
+        }
+        Err(e) => return EmbedOutcome::Failed(e),
+    };
+
+    let mut total = 0usize;
+    for (repo_name, _) in repos {
+        let chunks = match store.list_chunks(repo_name) {
+            Ok(c) => c,
+            Err(e) => {
+                snapshot_http_stats(http_stats.as_ref(), stats);
+                return EmbedOutcome::Failed(e);
+            }
+        };
+        // Build a flat (id, text) list, batch-encode, then upsert.
+        let texts: Vec<String> = chunks.iter().map(|(_, _, _, _, c)| c.clone()).collect();
+        let vectors = match embedder.encode_batch(&texts).await {
+            Ok(v) => v,
+            Err(e) => {
+                snapshot_http_stats(http_stats.as_ref(), stats);
+                return EmbedOutcome::Failed(e);
+            }
+        };
+        if vectors.len() != chunks.len() {
+            snapshot_http_stats(http_stats.as_ref(), stats);
+            return EmbedOutcome::Failed(anyhow::anyhow!(
+                "embedder returned {} vectors for {} chunks in repo {}",
+                vectors.len(),
+                chunks.len(),
+                repo_name
+            ));
+        }
+        // Bulk upsert wrapped in a single transaction. vec0 0.1.9 loses
+        // writes silently when fed thousands of autocommit inserts.
+        let pairs: Vec<(i64, Vec<f32>)> = chunks
+            .iter()
+            .zip(vectors.into_iter())
+            .map(|((id, _, _, _, _), v)| (*id, v))
+            .collect();
+        if let Err(e) = store.upsert_embeddings_batch(&pairs) {
+            snapshot_http_stats(http_stats.as_ref(), stats);
+            return EmbedOutcome::Failed(e);
+        }
+        total += chunks.len();
+        info!("embedded {} chunks for repo {}", chunks.len(), repo_name);
+    }
+    snapshot_http_stats(http_stats.as_ref(), stats);
+    EmbedOutcome::Done(total)
+}
+
+/// Copy the HTTP embedder atomic counters into `BuildStats`. No-op for
+/// non-HTTP providers (their `http_stats` is `None`). Called at every exit
+/// point of `try_embed_async` so the caller sees the same observed values on
+/// the success and failure paths.
+fn snapshot_http_stats(
+    http: Option<&std::sync::Arc<crate::search::http_embedder::HttpEmbedderStats>>,
+    stats: &mut BuildStats,
+) {
+    use std::sync::atomic::Ordering;
+    if let Some(s) = http {
+        stats.embed_requests = s.requests.load(Ordering::Relaxed);
+        stats.embed_retries = s.retries.load(Ordering::Relaxed);
+        stats.embed_input_chars = s.input_chars.load(Ordering::Relaxed);
+        stats.embed_vectors = s.vectors_returned.load(Ordering::Relaxed);
+    }
+}
+
+/// Legacy path: same behaviour as the v0.2.0-alpha `try_embed` — preserved
+/// so `repolayer.yml` files without an `embedding:` block still work.
+fn legacy_try_embed_potion(
+    store: &mut crate::search::store::SearchStore,
     repos: &[(String, std::path::PathBuf)],
 ) -> EmbedOutcome {
     use crate::search::download::{ensure_model, ModelInfo};
@@ -741,11 +869,12 @@ fn try_embed(
             Ok(c) => c,
             Err(e) => return EmbedOutcome::Failed(e),
         };
-        for (id, _path, _s, _e, content) in &chunks {
-            let v = embedder.encode_one(content);
-            if let Err(e) = store.upsert_embedding(*id, &v) {
-                return EmbedOutcome::Failed(e);
-            }
+        let pairs: Vec<(i64, Vec<f32>)> = chunks
+            .iter()
+            .map(|(id, _, _, _, content)| (*id, embedder.encode_one(content).to_vec()))
+            .collect();
+        if let Err(e) = store.upsert_embeddings_batch(&pairs) {
+            return EmbedOutcome::Failed(e);
         }
         total += chunks.len();
     }

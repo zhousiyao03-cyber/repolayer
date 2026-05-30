@@ -2,7 +2,14 @@
 //!
 //! Schema v1: chunks table (with repo column), meta table.
 //! Schema v2 adds the `chunk_vec` virtual table (sqlite-vec `vec0`) for
-//! 256-dim L2-normalised embeddings keyed by `chunks.id`.
+//! L2-normalised embeddings keyed by `chunks.id`.
+//! Schema v3 makes the `chunk_vec` DIM runtime-driven (was hardcoded at 256
+//! in v2). `meta.dim` records the active dim; reopening with a different dim
+//! drops + recreates `chunk_vec` while preserving the `chunks` table — the
+//! caller is responsible for re-embedding.
+//! Schema v4 adds the summary lane: `summary_chunks` (LLM-generated text)
+//! and `summary_vec` (vec0 kNN over their embeddings). `meta.summary_dim` is
+//! independent from `meta.dim` and follows the same drop-on-mismatch policy.
 //! One database file per workspace.
 
 use anyhow::{Context, Result};
@@ -11,7 +18,6 @@ use std::path::Path;
 use std::sync::Once;
 
 use crate::search::chunker::Chunk;
-use crate::search::embed::DIM;
 
 /// Row returned by [`SearchStore::list_chunks`]: `(id, path, start_line, end_line, content)`.
 pub type ChunkRow = (i64, String, u32, u32, String);
@@ -39,14 +45,42 @@ CREATE INDEX IF NOT EXISTS idx_chunks_repo_path ON chunks(repo, path);
 CREATE INDEX IF NOT EXISTS idx_chunks_repo ON chunks(repo);
 "#;
 
-/// vec0 virtual table holding the 256-dim chunk embeddings.
+/// Build the vec0 virtual-table DDL for the given dim. SQLite needs the
+/// integer baked into the column type, so we format it at runtime.
 /// `rowid` mirrors `chunks.id`; we keep them in sync manually because
 /// vec0 cannot itself enforce a foreign key.
-const SCHEMA_V2_VEC: &str = "
-CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(
-    embedding float[256]
+fn schema_chunk_vec(dim: usize) -> String {
+    format!(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS chunk_vec USING vec0(
+            embedding float[{dim}]
+         );"
+    )
+}
+
+/// Schema v4: summary lane storage. The `summary_chunks` table holds
+/// LLM-generated summary text (one row per Declaration scope); `summary_vec`
+/// (built separately by [`schema_summary_vec`]) holds the kNN embeddings.
+/// `created_at` defaults to the current unix timestamp so callers can
+/// `INSERT` without specifying it.
+const SCHEMA_V4_SUMMARY: &str = r#"
+CREATE TABLE IF NOT EXISTS summary_chunks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo        TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    scope       TEXT NOT NULL,   -- 'module' | 'type' | 'function' | 'method'
+    text        TEXT NOT NULL,
+    created_at  INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
-";
+CREATE INDEX IF NOT EXISTS idx_summary_repo_path ON summary_chunks(repo, path);
+"#;
+
+/// Build the vec0 virtual-table DDL for `summary_vec` at the given dim.
+/// Same runtime-format pattern as [`schema_chunk_vec`]; tracked by
+/// `meta.summary_dim` rather than `meta.dim` so the two lanes can in
+/// principle diverge.
+fn schema_summary_vec(dim: usize) -> String {
+    format!("CREATE VIRTUAL TABLE IF NOT EXISTS summary_vec USING vec0(embedding float[{dim}]);")
+}
 
 /// Register the bundled sqlite-vec extension as a SQLite auto-extension.
 /// Idempotent — safe to call from every `SearchStore::open` invocation.
@@ -71,11 +105,21 @@ fn register_sqlite_vec() {
 
 pub struct SearchStore {
     conn: Connection,
+    dim: usize,
 }
 
 impl SearchStore {
-    /// Open (or create) a search.db at the given path.
+    /// Open with the default DIM derived from the legacy `embed::DIM`. For
+    /// callers that haven't migrated to dim-aware open paths.
     pub fn open(path: &Path) -> Result<Self> {
+        Self::open_with_dim(path, crate::search::embed::DIM)
+    }
+
+    /// Open (or create) a `search.db` at `path`, ensuring `chunk_vec`'s vec0
+    /// column is sized to `dim`. When an existing db has a different `meta.dim`,
+    /// `chunk_vec` is dropped and recreated (chunks table is preserved; the
+    /// caller is responsible for re-embedding).
+    pub fn open_with_dim(path: &Path, dim: usize) -> Result<Self> {
         register_sqlite_vec();
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).ok();
@@ -84,12 +128,68 @@ impl SearchStore {
             .with_context(|| format!("opening search.db at {}", path.display()))?;
         crate::graph::store::apply_perf_pragmas(&conn)?;
         conn.execute_batch(SCHEMA_V1)?;
-        conn.execute_batch(SCHEMA_V2_VEC)?;
+
+        // Check existing dim; recreate chunk_vec if mismatched. For v2 indexes
+        // in the wild, `meta.dim` is absent (returns None) and `chunk_vec`
+        // already exists with the hardcoded 256-dim column — we still want to
+        // recreate so the column type matches `dim` (the drop is a no-op when
+        // the table didn't exist).
+        let existing_dim: Option<i64> = conn
+            .query_row(
+                "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'dim'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        if existing_dim != Some(dim as i64) {
+            conn.execute("DROP TABLE IF EXISTS chunk_vec", [])?;
+        }
+        conn.execute_batch(&schema_chunk_vec(dim))?;
         conn.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '2')",
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('dim', ?1)",
+            params![dim as i64],
+        )?;
+
+        // Schema v4: summary lane. `summary_vec` follows the same
+        // drop-on-mismatch pattern as `chunk_vec`, tracked by its own
+        // `meta.summary_dim` (separate from `meta.dim`). The two lanes will
+        // typically share a dim in practice, but the migration treats them
+        // independently so we can swap one without touching the other.
+        conn.execute_batch(SCHEMA_V4_SUMMARY)?;
+        let existing_summary_dim: Option<i64> = conn
+            .query_row(
+                "SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'summary_dim'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        if existing_summary_dim != Some(dim as i64) {
+            conn.execute("DROP TABLE IF EXISTS summary_vec", [])?;
+        }
+        conn.execute_batch(&schema_summary_vec(dim))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('summary_dim', ?1)",
+            params![dim as i64],
+        )?;
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '4')",
             [],
         )?;
-        Ok(Self { conn })
+        Ok(Self { conn, dim })
+    }
+
+    /// Crate-internal accessor: return the underlying SQLite connection.
+    /// Despite the name `conn_mut`, this returns `&Connection` — rusqlite
+    /// permits transactions and `execute` through a shared reference.
+    /// Used by `store_summary::SummaryStore` to share the same connection
+    /// without owning it.
+    pub(crate) fn conn_mut(&self) -> &Connection {
+        &self.conn
+    }
+
+    /// Return the active embedding dim for this store.
+    pub fn embedding_dim(&self) -> Result<usize> {
+        Ok(self.dim)
     }
 
     /// Return the schema version stored in the meta table.
@@ -140,12 +240,18 @@ impl SearchStore {
 
     /// Insert (or replace) a single chunk's embedding vector.
     /// `chunk_id` should equal the autoincrement id from the chunks table;
-    /// vec is treated as little-endian f32, length must be `DIM`.
+    /// vec is treated as little-endian f32, length must equal `self.dim`.
+    ///
+    /// Note: for bulk loads (build / re-embed), prefer
+    /// [`Self::upsert_embeddings_batch`] — it wraps the inserts in a single
+    /// transaction. sqlite-vec 0.1.9's vec0 backing tables behave erratically
+    /// at scale (32k+ rows) under autocommit; data appeared to land but was
+    /// missing on reopen.
     pub fn upsert_embedding(&self, chunk_id: i64, vector: &[f32]) -> Result<()> {
-        if vector.len() != DIM {
+        if vector.len() != self.dim {
             anyhow::bail!(
                 "upsert_embedding: expected {} dims, got {}",
-                DIM,
+                self.dim,
                 vector.len()
             );
         }
@@ -158,13 +264,44 @@ impl SearchStore {
         Ok(())
     }
 
+    /// Bulk upsert variant. Inserts all `(chunk_id, vector)` pairs inside a
+    /// single explicit BEGIN…COMMIT transaction. Required for build-time
+    /// embedding writes — without the transaction wrapper, vec0 may report
+    /// success per insert but lose data on connection drop.
+    pub fn upsert_embeddings_batch(&mut self, pairs: &[(i64, Vec<f32>)]) -> Result<()> {
+        for (_, v) in pairs {
+            if v.len() != self.dim {
+                anyhow::bail!(
+                    "upsert_embeddings_batch: expected {} dims, got {}",
+                    self.dim,
+                    v.len()
+                );
+            }
+        }
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt =
+                tx.prepare("INSERT OR REPLACE INTO chunk_vec(rowid, embedding) VALUES (?1, ?2)")?;
+            for (id, v) in pairs {
+                let bytes = vector_to_le_bytes(v);
+                stmt.execute(params![id, bytes])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
     /// k-nearest-neighbour cosine search over `chunk_vec`. Returns
     /// `(chunk_id, distance)` tuples sorted ascending (closer is better).
     /// vec0 expressly returns the L2 distance even for normalised inputs;
     /// callers convert to a similarity if they need one.
     pub fn knn_search(&self, query: &[f32], k: usize) -> Result<Vec<(i64, f32)>> {
-        if query.len() != DIM {
-            anyhow::bail!("knn_search: expected {} dims, got {}", DIM, query.len());
+        if query.len() != self.dim {
+            anyhow::bail!(
+                "knn_search: expected {} dims, got {}",
+                self.dim,
+                query.len()
+            );
         }
         let bytes = vector_to_le_bytes(query);
         let mut stmt = self.conn.prepare(
@@ -428,12 +565,12 @@ impl SearchStore {
         const DENSE_STRICT_DIST_MAX: f32 = 1.00;
         let mut sem_ranked: Vec<(u32, f32)> = Vec::new();
         if let Some(qv) = query_embedding {
-            if self.embedding_count()? > 0 && qv.len() == DIM {
+            if self.embedding_count()? > 0 && qv.len() == self.dim {
                 // vec0 has no per-repo predicate, so when filtering to one repo
                 // we over-fetch and let id_to_pos drop out-of-repo rows. The
                 // 4× multiplier already over-fetches for k; an extra 4× for
                 // repo filter handles workspaces where a repo holds ≤25% of
-                // the chunks (typical for our 40-repo ttec workspace).
+                // the chunks (typical for a 40-repo workspace).
                 let knn_k = if repo_filter.is_some() { k * 16 } else { k * 4 };
                 let neighbours = self.knn_search(qv, knn_k)?;
                 for (chunk_id, dist) in &neighbours {
@@ -445,6 +582,31 @@ impl SearchStore {
                         // smaller is better. Convert to a similarity by
                         // negating so RRF's "higher is better" assumption holds.
                         sem_ranked.push((pos, -dist));
+                    }
+                }
+
+                // NEW: summary lane. Pull kNN over `summary_vec`, then map
+                // each hit's (repo, path) back to chunk positions in `all`.
+                // The -0.05 score discount makes a summary-mediated match
+                // strictly worse than a direct chunk_vec match at the same
+                // distance, so direct hits win ties in RRF. Duplicate
+                // positions added here are fine — fusion::rrf_scores dedup
+                // keeps the best per id.
+                let summary_store = crate::search::store_summary::SummaryStore::new(self);
+                if summary_store.count()? > 0 {
+                    let summary_neighbours = summary_store.knn(qv, k * 4)?;
+                    for (summary_id, dist) in &summary_neighbours {
+                        if *dist > DENSE_LOOSE_DIST_MAX {
+                            continue;
+                        }
+                        let Ok(sc) = summary_store.get_by_id(*summary_id) else {
+                            continue;
+                        };
+                        for (pos, row) in all.iter().enumerate() {
+                            if row.1 == sc.repo && row.2 == sc.path {
+                                sem_ranked.push((pos as u32, -dist - 0.05));
+                            }
+                        }
                     }
                 }
             }

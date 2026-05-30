@@ -32,7 +32,24 @@ pub async fn run(
         );
     }
 
-    let store = crate::search::store::SearchStore::open(&db)?;
+    // Resolve the embedding config first — its `dim` decides what dimension
+    // SearchStore opens chunk_vec at. Without this the store defaults to the
+    // potion 256-dim layout and rejects wider remote embedding query vectors
+    // (e.g. 1024-dim).
+    let workspace = crate::cli::workspace::resolve_workspace()?;
+    let cfg_path = workspace.join("repolayer.yml");
+    let embedding_cfg = if cfg_path.exists() {
+        crate::config::Config::from_path(&cfg_path)
+            .ok()
+            .and_then(|c| c.embedding)
+    } else {
+        None
+    };
+    let dim = embedding_cfg
+        .as_ref()
+        .map(|e| e.dim as usize)
+        .unwrap_or(crate::search::embed::DIM);
+    let store = crate::search::store::SearchStore::open_with_dim(&db, dim)?;
 
     let validated_repo = match repo.as_deref() {
         None => None,
@@ -42,9 +59,7 @@ pub async fn run(
         }
     };
 
-    // Try to encode the query with the cached embedding model. If the model
-    // isn't there, we silently degrade to BM25-only.
-    let qv = crate::search::embed::try_encode_query(&query);
+    let qv = crate::search::embedder::encode_query_async(embedding_cfg.as_ref(), &query).await;
 
     let (hits, lane) =
         store.search_hybrid_filtered(&query, k, qv.as_deref(), None, validated_repo.as_deref())?;

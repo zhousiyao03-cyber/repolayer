@@ -4,7 +4,7 @@
 //! `REPOLAYER_INDEX=<dir>` env var. The motivation is that an agent (or a
 //! human) often `cd`s into a specific business repo to edit code, but
 //! still wants the cross-repo index from a separately-checked-out
-//! workspace (e.g. `~/repolayer_ttec/`). Pinning the index location to
+//! workspace (e.g. `~/my_workspace/`). Pinning the index location to
 //! one env var decouples "where I'm editing" from "where the index lives"
 //! without hijacking cwd.
 //!

@@ -16,6 +16,48 @@
 use ignore::WalkBuilder;
 use std::path::Path;
 
+/// File basename **suffixes** we always skip — even if `.gitignore` doesn't
+/// list them. These match against the file basename (case-sensitive).
+///
+/// Rationale: these files are virtually always auto-generated or carry no
+/// semantic value for cross-repo agent queries, and they dominate the long-tail
+/// of `>8k char` chunks that hit the embedding provider's token limit. Skipping them keeps
+/// dense-search recall focused on hand-written code.
+///
+/// Important non-inclusions:
+///   - `*.d.ts`: kept in. Some `.d.ts` are generated IDL stubs that frontends
+///     actually call (e.g. `*_api.d.ts`); the bot relies on them to trace RPC
+///     usage. Add per-repo `.ast-outline-ignore` if a specific repo has
+///     useless `.d.ts`.
+///   - `.proto` / `.thrift`: IDL sources — these are *primary* artefacts and
+///     get a different code path (`adapters/idl/`).
+pub const HARDCODED_IGNORE_FILE_SUFFIXES: &[&str] = &[
+    // Protobuf / gRPC codegen (Go / C++ / Python)
+    ".pb.go",
+    "_pb.go",
+    ".pb.cc",
+    ".pb.h",
+    "_pb2.py",
+    "_pb2_grpc.py",
+    // Go test files
+    "_test.go",
+    // JS / TS test files
+    ".test.ts",
+    ".test.tsx",
+    ".test.js",
+    ".test.jsx",
+    ".spec.ts",
+    ".spec.tsx",
+    ".spec.js",
+    ".spec.jsx",
+    // Minified bundles (not human-readable)
+    ".min.js",
+    ".min.css",
+    // Lepus / Lynx codegen output
+    ".lepus.ts",
+    ".lepus.tsx",
+];
+
 /// Directories we always skip — even if `.gitignore` doesn't list them.
 ///
 /// Synced with the file-selection plan. New entries should be ones that:
@@ -78,10 +120,23 @@ pub fn should_skip_path(path: &Path, repo_root: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(repo_root) else {
         return false;
     };
-    rel.components().any(|c| {
+    // Directory denylist: applies anywhere in the path.
+    if rel.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
         HARDCODED_IGNORE_DIRS.iter().any(|d| *d == s)
-    })
+    }) {
+        return true;
+    }
+    // File suffix denylist: applies to the basename only.
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if HARDCODED_IGNORE_FILE_SUFFIXES
+            .iter()
+            .any(|sfx| name.ends_with(sfx))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]
@@ -125,6 +180,48 @@ mod tests {
         let root = PathBuf::from("/r");
         assert!(!should_skip_path(&root.join("src/main.rs"), &root));
         assert!(!should_skip_path(&root.join("docs/README.md"), &root));
+    }
+
+    #[test]
+    fn skip_pb_go_stubs() {
+        let root = PathBuf::from("/r");
+        assert!(should_skip_path(
+            &root.join("internal/model/service/example.pb.go"),
+            &root
+        ));
+        assert!(should_skip_path(&root.join("foo_pb.go"), &root));
+    }
+
+    #[test]
+    fn skip_test_files() {
+        let root = PathBuf::from("/r");
+        assert!(should_skip_path(&root.join("foo_test.go"), &root));
+        assert!(should_skip_path(&root.join("src/Foo.test.ts"), &root));
+        assert!(should_skip_path(&root.join("src/Foo.spec.tsx"), &root));
+    }
+
+    #[test]
+    fn skip_minified_and_lepus() {
+        let root = PathBuf::from("/r");
+        assert!(should_skip_path(&root.join("dist/app.min.js"), &root));
+        assert!(should_skip_path(
+            &root.join("src/components/banner.lepus.ts"),
+            &root
+        ));
+    }
+
+    #[test]
+    fn keep_dts_and_idl_sources() {
+        // .d.ts files are NOT skipped — some are generated IDL stubs that
+        // frontends import (e.g. `*_api.d.ts`).
+        let root = PathBuf::from("/r");
+        assert!(!should_skip_path(
+            &root.join("src/api/example_service_api.d.ts"),
+            &root
+        ));
+        // .proto / .thrift sources are primary IDL artefacts.
+        assert!(!should_skip_path(&root.join("idl/service.proto"), &root));
+        assert!(!should_skip_path(&root.join("idl/service.thrift"), &root));
     }
 
     #[test]

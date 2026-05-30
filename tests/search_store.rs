@@ -15,10 +15,10 @@ fn make_chunk(path: &str, line: u32, content: &str) -> Chunk {
 }
 
 #[test]
-fn open_writes_schema_version_2() {
+fn open_writes_schema_version_4() {
     let dir = tempdir().unwrap();
     let s = SearchStore::open(&dir.path().join("search.db")).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 2);
+    assert_eq!(s.schema_version().unwrap(), 4);
 }
 
 #[test]

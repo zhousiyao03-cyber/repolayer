@@ -74,7 +74,10 @@ impl<'a> CallsLinker<'a> {
             if is_noise_name(sym) {
                 continue;
             }
-            by_name.entry(sym.to_string()).or_default().push(n.id.clone());
+            by_name
+                .entry(sym.to_string())
+                .or_default()
+                .push(n.id.clone());
         }
         by_name.retain(|_, ids| ids.len() == 1);
         if by_name.is_empty() {
@@ -197,7 +200,9 @@ fn scan_file(
 /// different ambitions and the function is 25 lines).
 fn collect_call_callees(source: &str, lang: SupportLang) -> HashSet<String> {
     let call_kinds: &[&str] = match lang {
-        SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => &["call_expression"],
+        SupportLang::TypeScript | SupportLang::Tsx | SupportLang::JavaScript => {
+            &["call_expression"]
+        }
         SupportLang::Python => &["call"],
         SupportLang::Go => &["call_expression"],
         SupportLang::Rust => &["call_expression", "method_call_expression"],

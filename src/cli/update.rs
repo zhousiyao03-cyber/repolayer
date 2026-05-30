@@ -12,5 +12,5 @@ pub async fn run() -> Result<()> {
             db.display()
         );
     }
-    update(workspace, db, cfg)
+    update(workspace, db, cfg).await
 }

@@ -106,29 +106,29 @@ mod tests {
     #[test]
     fn typo_suggests_closest() {
         let known = vec![
-            "oec_promotion_voucher_api".to_string(),
-            "promotion_member".to_string(),
-            "sea_ug_funfair".to_string(),
+            "payment_gateway_api".to_string(),
+            "order_service".to_string(),
+            "user_profile".to_string(),
         ];
-        let err = require_repo("oec_promotion_vouchr_api", &known).unwrap_err();
+        let err = require_repo("payment_gatway_api", &known).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("oec_promotion_voucher_api"), "msg: {msg}");
+        assert!(msg.contains("payment_gateway_api"), "msg: {msg}");
     }
 
     #[test]
     fn substring_outranks_distant_edit() {
         let known = vec![
-            "promotion_member".to_string(),
+            "user_profile".to_string(),
             "totally_unrelated".to_string(),
         ];
-        let err = require_repo("member", &known).unwrap_err();
+        let err = require_repo("profile", &known).unwrap_err();
         let msg = err.to_string();
         // The substring match should appear before any distant-edit fallback.
-        let prom_idx = msg.find("promotion_member");
+        let prom_idx = msg.find("user_profile");
         let unrel_idx = msg.find("totally_unrelated");
         assert!(
             prom_idx.is_some(),
-            "promotion_member should be suggested: {msg}"
+            "user_profile should be suggested: {msg}"
         );
         if let (Some(p), Some(u)) = (prom_idx, unrel_idx) {
             assert!(p < u, "substring match should rank first: {msg}");

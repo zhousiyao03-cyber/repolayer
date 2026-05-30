@@ -2,6 +2,7 @@ pub mod anthropic;
 pub mod deepseek;
 pub mod embedding;
 pub mod summary;
+pub mod summary_store;
 
 use anyhow::Result;
 use async_trait::async_trait;

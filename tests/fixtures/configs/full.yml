@@ -1,14 +1,14 @@
 repos:
-  - path: ../promotion_member
-  - path: ../promotion_benefit
-  - path: ../promotion_fulfillment
-  - path: ../mall_bff_sdk
+  - path: ../user_service
+  - path: ../order_service
+  - path: ../payment_service
+  - path: ../bff_sdk
   - path: ../http_idl
     type: idl
 
 links:
-  - from: mall_bff_sdk
-    to: promotion_member_api
+  - from: bff_sdk
+    to: user_service_api
     kind: http
 
 llm:

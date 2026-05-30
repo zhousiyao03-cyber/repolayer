@@ -4,13 +4,13 @@ use repolayer::graph::model::*;
 fn node_id_is_stable_across_runs() {
     let a = Node::new(
         NodeKind::Function,
-        "promotion_member",
+        "user_service",
         "src/auth.ts",
         Some("login"),
     );
     let b = Node::new(
         NodeKind::Function,
-        "promotion_member",
+        "user_service",
         "src/auth.ts",
         Some("login"),
     );
@@ -21,13 +21,13 @@ fn node_id_is_stable_across_runs() {
 fn different_symbols_get_different_ids() {
     let a = Node::new(
         NodeKind::Function,
-        "promotion_member",
+        "user_service",
         "src/auth.ts",
         Some("login"),
     );
     let b = Node::new(
         NodeKind::Function,
-        "promotion_member",
+        "user_service",
         "src/auth.ts",
         Some("logout"),
     );

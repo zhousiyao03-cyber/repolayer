@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-pub fn update(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Result<()> {
+pub async fn update(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Result<()> {
     let mut indexer = Indexer::new(workspace_root.clone(), db_path, config.clone())?;
 
     // Identify changed files in each repo via git diff (working tree vs HEAD)
@@ -138,8 +138,39 @@ pub fn update(workspace_root: PathBuf, db_path: PathBuf, config: Config) -> Resu
         // already cached. Mirrors the cache-only policy in the build path —
         // we never download here, since `update` should be cheap.
         if !new_chunk_ids.is_empty() {
-            if let Err(e) = embed_chunks_if_cached(&indexer.search_store, &new_chunk_ids) {
+            if let Err(e) = embed_chunks_if_cached(&mut indexer.search_store, &new_chunk_ids) {
                 warn!("incremental embedding failed (continuing): {}", e);
+            }
+        }
+    }
+
+    // Per-file summary refresh (only when summary.enabled). We re-summarise
+    // exactly the changed files, not the whole repo — keeps `update` from
+    // burning thousands of LLM calls per day.
+    if let (Some(emb_cfg), Some(sum_cfg)) = (
+        indexer.config.embedding.as_ref(),
+        indexer.config.summary.as_ref(),
+    ) {
+        if sum_cfg.enabled {
+            // Build (repo, path) pairs using the same path key the chunk lane
+            // writes — absolute-path string from `path.to_string_lossy()` —
+            // so `run_summary_phase_for_files`' filter matches.
+            let mut changed_pairs: Vec<(String, String)> = Vec::new();
+            for (repo_name, ch) in &by_repo {
+                for path in &ch.files {
+                    changed_pairs.push((repo_name.clone(), path.to_string_lossy().into_owned()));
+                }
+            }
+            match crate::llm::summary_store::run_summary_phase_for_files(
+                &indexer.search_store,
+                &changed_pairs,
+                emb_cfg,
+                sum_cfg,
+            )
+            .await
+            {
+                Ok(n) => info!("incremental summary: refreshed {n} files"),
+                Err(e) => warn!("incremental summary failed: {e}"),
             }
         }
     }
@@ -156,7 +187,10 @@ struct RepoChanges {
 /// Encode a set of chunk ids and write the resulting vectors to `chunk_vec`.
 /// Returns `Ok(())` and skips silently if the embedding model isn't already
 /// cached on disk — `update` should never block on a 64 MB download.
-fn embed_chunks_if_cached(store: &crate::search::store::SearchStore, ids: &[i64]) -> Result<()> {
+fn embed_chunks_if_cached(
+    store: &mut crate::search::store::SearchStore,
+    ids: &[i64],
+) -> Result<()> {
     use crate::search::download::{ensure_model, ModelInfo};
     use crate::search::embed::Embedder;
 
@@ -198,10 +232,13 @@ fn embed_chunks_if_cached(store: &crate::search::store::SearchStore, ids: &[i64]
     let rows = stmt.query_map(params_dyn.as_slice(), |row| {
         Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
     })?;
-    for r in rows {
-        let (id, content) = r?;
-        let v = embedder.encode_one(&content);
-        store.upsert_embedding(id, &v)?;
-    }
+    let collected: rusqlite::Result<Vec<(i64, String)>> = rows.collect();
+    let collected = collected?;
+    drop(stmt);
+    let pairs: Vec<(i64, Vec<f32>)> = collected
+        .into_iter()
+        .map(|(id, content)| (id, embedder.encode_one(&content).to_vec()))
+        .collect();
+    store.upsert_embeddings_batch(&pairs)?;
     Ok(())
 }

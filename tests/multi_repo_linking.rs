@@ -217,6 +217,8 @@ fn cross_repo_rust_workspace_resolves() {
         ],
         links: vec![],
         llm: None,
+        embedding: None,
+        summary: None,
     };
 
     let idx = PackageIndex::build(workspace.path(), &cfg).unwrap();
@@ -253,6 +255,8 @@ fn cross_repo_python_package_resolves() {
         }],
         links: vec![],
         llm: None,
+        embedding: None,
+        summary: None,
     };
 
     let idx = PackageIndex::build(workspace.path(), &cfg).unwrap();

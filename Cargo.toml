@@ -1,6 +1,6 @@
 [package]
 name = "repolayer"
-version = "0.2.0-alpha"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Cross-repo extension of ast-outline — multi-repo graph + IDL linking + 15 MCP tools for AI agents."

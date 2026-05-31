@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `repolayer` is a Rust CLI + MCP server that pre-computes 4 SQLite-backed indices (graph, per-file outline, file-level deps, hybrid search) across one or more repos and serves them to AI agents via MCP. Single static binary, ast-grep-core parsing for source languages, bare tree-sitter for IDL (protobuf/thrift). No runtime deps for end users.
 
-Status: **v0.2.0-alpha**. Repositioned as the cross-repo + IDL extension of [aeroxy/ast-outline](https://github.com/aeroxy/ast-outline) — see `NOTICE` for adopted components.
+Status: **v0.3.0**. Repositioned as the cross-repo + IDL extension of [aeroxy/ast-outline](https://github.com/aeroxy/ast-outline) — see `NOTICE` for adopted components.
 
 ## Common commands
 
@@ -88,7 +88,7 @@ Each store has its own `meta.schema_version` row; bumping requires explicit migr
 
 ## Test structure
 
-Integration tests under `tests/`, one file per concern. ~290+ tests at v0.2.0-alpha.
+Integration tests under `tests/`, one file per concern. 370+ tests at v0.3.0.
 
 **Fixtures**: `tests/fixtures/{single_repo_ts, single_repo_py, single_repo_go, multi_repo, multi_repo_with_idl, idl, configs}` copied into `tempfile::tempdir()` per test.
 

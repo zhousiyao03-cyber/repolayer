@@ -14,9 +14,9 @@
 > Calls edges, and a pluggable embedding backend (local potion model,
 > Ollama, or any OpenAI-compatible HTTP endpoint) for semantic search.
 
-## Status: v0.2.0-alpha
+## Status: v0.3.0
 
-- **18 CLI subcommands** covering symbol lookup, who-calls-this,
+- **17 CLI subcommands** covering symbol lookup, who-calls-this,
   IDL method → server / client tracing, hybrid BM25 + semantic search,
   outline / function-body extraction, and the dependency graph.
 - **4 SQLite stores under `.repolayer/`** — `index.db` (graph), `outline.db`
@@ -47,7 +47,8 @@ cd repolayer
 cargo install --path .
 ```
 
-Requires Rust 1.75+. Installs `repolayer` to `~/.cargo/bin`.
+Requires a recent stable Rust toolchain (CI builds on current stable).
+Installs `repolayer` to `~/.cargo/bin`.
 
 ## Quickstart
 
@@ -184,7 +185,7 @@ The dense-search lane is pluggable via the `embedding` block above:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  18 CLI subcommands                                                 │
+│  17 CLI subcommands                                                 │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Query layer (read-only)                                            │
 │    index-only (honours $REPOLAYER_INDEX):                           │
